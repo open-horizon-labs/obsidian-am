@@ -184,17 +184,26 @@ export function managedImportItemId(
 	content: string,
 	frontmatter: Record<string, unknown> | undefined,
 	path: string,
+	allowLegacyIdentity = false,
 ): string | undefined {
 	const cachedId = frontmatter?._id;
 	const cachedLink = frontmatter?.deepLink;
+	const hasManagedProperties = Array.isArray(
+		frontmatter?.[MANAGED_PROPERTIES_KEY],
+	);
 	if (
 		typeof cachedId === "string"
 		&& typeof cachedLink === "string"
-		&& cachedLink.includes(`/#p=${cachedId}`)
+		&& cachedLink === `https://app.amazingmarvin.com/#p=${cachedId}`
+		&& hasManagedProperties
 	) {
 		return cachedId;
 	}
-	if (cachedId === "unassigned" && frontmatter?.type === "inbox") {
+	if (
+		cachedId === "unassigned"
+		&& frontmatter?.type === "inbox"
+		&& hasManagedProperties
+	) {
 		return "unassigned";
 	}
 
@@ -205,21 +214,43 @@ export function managedImportItemId(
 		}
 	}
 
-	const frontmatterLines = frontmatterSlice(content);
-	const id = frontmatterLines.match(/^_id:\s*([^\s#]+)\s*$/m)?.[1];
-	const deepLink = frontmatterLines.match(
-		/^deepLink:\s*https:\/\/app\.amazingmarvin\.com\/#p=([^\s]+)\s*$/m,
-	)?.[1];
-	if (id && deepLink === id) {
-		return id;
-	}
+	if (allowLegacyIdentity) {
+		const frontmatterLines = frontmatterSlice(content);
+		const rawId = frontmatterLines.match(/^_id:\s*([^\s#]+)\s*$/m)?.[1];
+		const rawDeepLinkId = frontmatterLines.match(
+			/^deepLink:\s*https:\/\/app\.amazingmarvin\.com\/#p=([^\s]+)\s*$/m,
+		)?.[1];
+		const legacyId = (
+			typeof cachedId === "string"
+			&& typeof cachedLink === "string"
+			&& cachedLink === `https://app.amazingmarvin.com/#p=${cachedId}`
+		)
+			? cachedId
+			: rawId && rawDeepLinkId === rawId
+				? rawId
+				: undefined;
+		if (
+			legacyId
+			&& content
+				.replace(/\r\n/g, "\n")
+				.split("\n")
+				.some((line) => (
+					line.startsWith("# ")
+					&& line.includes(
+						`[⚓](https://app.amazingmarvin.com/#p=${legacyId})`,
+					)
+				))
+		) {
+			return legacyId;
+		}
 
-	if (
-		/(^|\/)AmazingMarvin\/Inbox\.md$/.test(path)
-		&& /^## Tasks$/m.test(content)
-		&& MARVIN_LINK.test(content)
-	) {
-		return "unassigned";
+		if (
+			/(^|\/)AmazingMarvin\/Inbox\.md$/.test(path)
+			&& /^## Tasks$/m.test(content)
+			&& MARVIN_LINK.test(content)
+		) {
+			return "unassigned";
+		}
 	}
 	return undefined;
 }

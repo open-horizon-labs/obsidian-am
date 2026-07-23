@@ -198,11 +198,31 @@ describe("Marvin frontmatter migration", () => {
 		});
 	});
 
-	it("finds managed IDs through cached, marker, malformed-legacy, and Inbox forms", () => {
+	it("finds owned IDs without claiming unrelated Marvin-linked notes", () => {
 		expect(managedImportItemId("", {
 			_id: "cached",
 			deepLink: "https://app.amazingmarvin.com/#p=cached",
+			[MANAGED_PROPERTIES_KEY]: ["_id", "deepLink"],
 		}, "Elsewhere.md")).toBe("cached");
+		expect(managedImportItemId("", {
+			_id: "personal",
+			deepLink: "https://app.amazingmarvin.com/#p=personal",
+		}, "Elsewhere.md")).toBeUndefined();
+		expect(managedImportItemId([
+			"---",
+			"_id: personal",
+			"deepLink: https://app.amazingmarvin.com/#p=personal",
+			"---",
+			"Personal notes without an imported heading.",
+		].join("\n"), {
+			_id: "personal",
+			deepLink: "https://app.amazingmarvin.com/#p=personal",
+		}, "AmazingMarvin/Personal.md", true)).toBeUndefined();
+		expect(managedImportItemId("", {
+			_id: "project-1",
+			deepLink: "https://app.amazingmarvin.com/#p=project-10",
+			[MANAGED_PROPERTIES_KEY]: ["_id", "deepLink"],
+		}, "Elsewhere.md")).toBeUndefined();
 
 		const marked = refreshCategoryRegion("", {
 			itemId: "marked",
@@ -217,11 +237,12 @@ describe("Marvin frontmatter migration", () => {
 			"labelIds: - broken",
 			"deepLink: https://app.amazingmarvin.com/#p=legacy",
 			"---",
-		].join("\n"), undefined, "Legacy.md")).toBe("legacy");
+			"# [⚓](https://app.amazingmarvin.com/#p=legacy) Legacy project",
+		].join("\n"), undefined, "Legacy.md", true)).toBe("legacy");
 
 		expect(managedImportItemId([
 			"## Tasks",
 			"- [ ] [⚓](https://app.amazingmarvin.com/#t=task) Task",
-		].join("\n"), undefined, "AmazingMarvin/Inbox.md")).toBe("unassigned");
+		].join("\n"), undefined, "AmazingMarvin/Inbox.md", true)).toBe("unassigned");
 	});
 });
