@@ -73,6 +73,11 @@ import {
 } from "./marvin/todayProjection";
 import { runTodayProjection } from "./marvin/todayWorkflow";
 import {
+	categoryProjectionItems,
+	planCategorySync,
+	type CategorySyncPlan,
+} from "./marvin/syncSelection";
+import {
 	formatTaskMetadata,
 	formatMarvinLabelTags,
 	orderTaskBody,
@@ -121,6 +126,8 @@ export default class AmazingMarvinPlugin extends Plugin {
 		getToday: (date) => this.getMarvinRouter().getTodayItems(date),
 		getDue: (date) => this.getMarvinRouter().getDueItems(date),
 		getTodayAndDue: (date) => this.getMarvinRouter().getTodayAndDue(date),
+		getCategories: () => this.getMarvinRouter().getCategories(),
+		getChildren: (parentId) => this.getMarvinRouter().getChildren(parentId),
 		getLabels: () => this.getMarvinRouter().getLabels(),
 		createTask: async (task) => {
 			const created = await this.getMarvinRouter().addTask(task);
@@ -592,9 +599,16 @@ export default class AmazingMarvinPlugin extends Plugin {
 		await this.refreshLabelsForProjection();
 		const categories = await this.getCategories();
 		this.categories = categories;
+		const plan = planCategorySync(
+			categories,
+			this.settings.syncSelectionMode,
+			this.settings.syncRoots.map((root) => root.id),
+		);
 		const existingFiles = await this.findManagedImportFiles();
-		await this.processCategories(existingFiles);
-		await this.processInbox(existingFiles);
+		await this.processCategories(existingFiles, plan);
+		if (this.settings.syncInbox) {
+			await this.processInbox(existingFiles);
+		}
 	}
 
 	async getCategories(): Promise<Category[]> {
@@ -700,11 +714,19 @@ export default class AmazingMarvinPlugin extends Plugin {
 		));
 	}
 
-	async processCategories(existingFiles: Map<string, TFile>) {
-		for (const category of this.categories) {
+	async processCategories(
+		existingFiles: Map<string, TFile>,
+		plan: CategorySyncPlan,
+	) {
+		for (const category of this.categories.filter(
+			(item) => plan.includedIds.has(item._id),
+		)) {
 			const path = this.getPathForCategory(category);
 			await this.moveManagedFile(existingFiles.get(category._id), path);
-			const content = await this.createContentForCategory(category);
+			const content = await this.createContentForCategory(
+				category,
+				plan,
+			);
 			await this.createOrUpdateManaged(
 				path,
 				category._id,
@@ -715,7 +737,12 @@ export default class AmazingMarvinPlugin extends Plugin {
 		}
 	}
 
-	formatItems(items: (Task | Category)[], level = 0, isSubtask = false) {
+	formatItems(
+		items: (Task | Category)[],
+		level = 0,
+		isSubtask = false,
+		allowedContainerIds?: ReadonlySet<string>,
+	) {
 		let taskContent = '';
 		let categoryContent = '';
 
@@ -724,6 +751,9 @@ export default class AmazingMarvinPlugin extends Plugin {
 			const isCategoryOrProject = item.type === 'category' || item.type === 'project';
 
 			if (isCategoryOrProject) {
+				if (allowedContainerIds && !allowedContainerIds.has(item._id)) {
+					continue;
+				}
 				// Handle category or project formatting
 				const path = this.getPathForCategory(item);
 				categoryContent += `${indentation}- [[${this.wikiTarget(path)}|${this.wikiAlias(item.title)}]] [⚓](${item.deepLink})\n`;
@@ -742,7 +772,12 @@ export default class AmazingMarvinPlugin extends Plugin {
 						type: "task" as const,
 						deepLink: "",
 					})) as Task[];
-					taskContent += this.formatItems(subtasks, level + 1, true); // Pass true for isSubtask
+					taskContent += this.formatItems(
+						subtasks,
+						level + 1,
+						true,
+						allowedContainerIds,
+					);
 				}
 			}
 		}
@@ -797,7 +832,10 @@ export default class AmazingMarvinPlugin extends Plugin {
 		};
 	}
 
-	async createContentForCategory(category: Category): Promise<string> {
+	async createContentForCategory(
+		category: Category,
+		plan: CategorySyncPlan,
+	): Promise<string> {
 		const labelTags = this.settings.showMarvinLabelsAsTags
 			? formatMarvinLabelTags(
 				category.labelIds,
@@ -818,8 +856,21 @@ export default class AmazingMarvinPlugin extends Plugin {
 			}
 		}
 		// Fetch and format tasks
-		const children = await this.getChildren(category._id);
-		content += this.formatItems(children);
+		const fetchedChildren = plan.contentIds.has(category._id)
+			? await this.getChildren(category._id)
+			: undefined;
+		const children = categoryProjectionItems(
+			category._id,
+			plan,
+			this.categories,
+			fetchedChildren,
+		);
+		content += this.formatItems(
+			children,
+			0,
+			false,
+			plan.includedIds,
+		);
 
 		return content;
 	}

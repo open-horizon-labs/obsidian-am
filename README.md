@@ -39,6 +39,13 @@ their Marvin ID when possible; empty folders from an earlier location are left
 in place. Notes for Marvin items no longer returned by the API are also left in
 place rather than deleted automatically.
 
+Imports can include all categories/projects or selected roots. A selected root
+includes all descendants; its ancestors remain as navigation-only notes so the
+Marvin hierarchy and backlinks stay intact, while sibling branches and
+ancestor tasks are excluded. Inbox import is controlled independently. An
+empty selected-root list intentionally imports no category/project notes, and
+changing the selection never deletes notes from an earlier import.
+
 ### Running a Sync
 
 To initiate a sync:
@@ -124,6 +131,8 @@ Additional object-returning methods are available for automation:
 - `getToday(date)`
 - `getDue(date)`
 - `getTodayAndDue(date)`
+- `getCategories()`
+- `getChildren(parentId)`
 - `getLabels()`
 - `createTask(task)`
 - `ensureTaskForSource(input)`
@@ -244,6 +253,8 @@ The initial tool surface is deliberately small:
 
 - `marvin_today`
 - `marvin_due`
+- `marvin_categories`
+- `marvin_children`
 - `marvin_labels`
 - `marvin_create_task`
 - `marvin_mark_done`

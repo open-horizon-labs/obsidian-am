@@ -1,9 +1,12 @@
 import type {
 	AddTaskRequest,
+	Category,
 	EnsureSourceActionResult,
 	Label,
 	MarvinReadResult,
+	Project,
 	ResolvePendingSourceActionRequest,
+	Task,
 	TaskOrProject,
 } from "@open-horizon/marvin-client";
 
@@ -45,6 +48,8 @@ export interface AmazingMarvinApi {
 	getToday(date: string): Promise<MarvinReadResult<TaskOrProject[]>>;
 	getDue(date: string): Promise<MarvinReadResult<TaskOrProject[]>>;
 	getTodayAndDue(date: string): Promise<MarvinReadResult<TaskOrProject[]>>;
+	getCategories(): Promise<MarvinReadResult<(Category | Project)[]>>;
+	getChildren(parentId: string): Promise<MarvinReadResult<(Task | Project)[]>>;
 	getLabels(): Promise<MarvinReadResult<Label[]>>;
 	createTask(task: AddTaskRequest): Promise<TaskOrProject>;
 	ensureTaskForSource(

@@ -9,7 +9,7 @@ allow a later split without making separate repositories a prerequisite.
 | `packages/marvin-client` | Limited-token endpoint models; request/error contract; Node fetch transport; local-first read routing; bounded cache; throttle circuit; stable-ID deduplication; Marvin deep links; source/action state machine | Obsidian vault/UI behavior; MCP schemas; source-note storage |
 | `src/marvin` | Obsidian `requestUrl` transport adapter; source-action frontmatter adapter; bounded Today projection; non-destructive category/project projection | HTTP/API semantics, cache policy, or fallback decisions |
 | Obsidian plugin | Commands, notices, task rendering, vault/editor changes, Obsidian links | A second Marvin API client |
-| `packages/marvin-mcp` | Stdio lifecycle, five tool schemas, tool-facing result/error presentation | A second Marvin API client; Obsidian access; generic LLM orchestration |
+| `packages/marvin-mcp` | Stdio lifecycle, seven tool schemas, tool-facing result/error presentation | A second Marvin API client; Obsidian access; generic LLM orchestration |
 
 Both runtime adapters construct `MarvinApiClient` instances and one
 `MarvinRouter`. Writes use the public API only. Safe reads may use the desktop
@@ -30,6 +30,12 @@ The stable label list uses the same local-first route and a longer bounded
 cache. The plugin resolves task `labelIds` to namespaced Obsidian tags, while
 the MCP exposes the same IDs to `marvin_create_task`; neither consumer
 reimplements label API behavior.
+
+Category and child reads are also exposed through the MCP and Obsidian object
+API. This lets an agent discover stable parent IDs instead of guessing them.
+Selective import remains a plugin projection concern: selected roots include
+descendants, ancestors are structure-only, and deselection never authorizes
+note deletion.
 
 ## Source/action and Today projection
 
