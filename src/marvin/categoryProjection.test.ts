@@ -52,6 +52,25 @@ describe("category/project managed regions", () => {
 		expect(result.content).toContain(CATEGORY_REGION_END);
 	});
 
+	it("does not adopt a legacy region for a similarly prefixed project ID", () => {
+		const original = [
+			"# [⚓](https://app.amazingmarvin.com/#p=project-10) Another project",
+			"",
+			"## Tasks",
+			"- [ ] [⚓](https://app.amazingmarvin.com/#t=old) Keep this task",
+		].join("\n");
+
+		const result = refreshCategoryRegion(original, {
+			itemId: "project-1",
+			rendered,
+			legacyKind: "category",
+		});
+
+		expect(result.content).toContain("Another project");
+		expect(result.content).toContain("Keep this task");
+		expect(result.content).toContain("Current task");
+	});
+
 	it("does not adopt a user checklist separated from generated tasks", () => {
 		const original = [
 			"# [⚓](https://app.amazingmarvin.com/#p=project-1) Project",
