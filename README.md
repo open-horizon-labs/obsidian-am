@@ -26,20 +26,19 @@ The Obsidian Amazing Marvin Plugin currently supports unidirectional synchroniza
 
 ### Sync Behavior
 
-Each sync operation performs a fresh import:
+Each import updates only the Amazing Marvin-managed region in an existing note. Your frontmatter properties and prose before or after that region are preserved. The first import of an older note adopts its recognizable generated category/project or Inbox task section; future imports use explicit markers.
 
-- The plugin first removes the existing category/project notes and folders that were previously synchronized.
-- It then creates new notes and folders based on the latest data from Amazing Marvin.
+The managed folder defaults to `AmazingMarvin` and can be changed in plugin settings. Existing imported categories, projects, and Inbox notes are moved by their Marvin ID when possible; empty folders from an earlier location are left in place.
 
 ### Running a Sync
 
 To initiate a sync:
 
 1. Open Obsidian's Command Palette with `Ctrl/Cmd + P`.
-2. Search for and select the command `Sync Amazing Marvin categories and projects`.
+2. Search for and select `Import categories and tasks`.
 3. The plugin will then proceed to update your Obsidian vault with the current structure and content from Amazing Marvin.
 
-Once synced, your Obsidian vault will contain a new `AmazingMarvin` folder. Inside, you'll find the structured notes corresponding to your categories and projects from Amazing Marvin.
+Once imported, your Obsidian vault will contain the configured managed folder. Inside, you'll find the structured notes corresponding to your categories and projects from Amazing Marvin.
 
 ### Creating a Marvin Task
 
@@ -134,8 +133,8 @@ Now, when you check off a task with an Amazing Marvin Link in an Obsidian note, 
 
 ### Important Considerations
 
-- **Data Loss**: Be cautious when editing Amazing Marvin-generated notes in Obsidian, as these changes will be overwritten by the next sync.
-- **Backup Recommended**: It's advisable to back up your Obsidian vault before running the sync, especially if you've made local modifications to the synchronized notes.
+- **Managed regions**: Changes inside an Amazing Marvin-managed category, project, or Inbox region are refreshed on the next import. Keep lasting notes outside the marked region.
+- **Conflicting moves**: If a destination file already exists or multiple notes claim the same Marvin item, import stops rather than overwriting either note.
 
 By following these guidelines, you can ensure your Amazing Marvin data is accurately reflected in Obsidian while being mindful of the plugin's current limitations.
 
