@@ -26,6 +26,19 @@ function operations(overrides: Partial<MarvinOperations> = {}): MarvinOperations
 	return {
 		getTodayItems: async () => todayResult,
 		getDueItems: async () => ({ ...todayResult, data: [] }),
+		getCategories: async () => ({
+			...todayResult,
+			data: [{
+				_id: "project-1",
+				title: "Knowledge work",
+				type: "project",
+				parentId: "root",
+			}],
+		}),
+		getChildren: async () => ({
+			...todayResult,
+			data: [{ _id: "child-1", title: "Draft", done: false }],
+		}),
 		getLabels: async () => ({
 			...todayResult,
 			data: [{ _id: "label-1", title: "Knowledge work" }],
@@ -69,8 +82,18 @@ describe("Amazing Marvin MCP", () => {
 			name: "marvin_labels",
 			arguments: {},
 		});
+		const categories = await client.callTool({
+			name: "marvin_categories",
+			arguments: {},
+		});
+		const children = await client.callTool({
+			name: "marvin_children",
+			arguments: { parentId: "project-1" },
+		});
 
 		expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+			"marvin_categories",
+			"marvin_children",
 			"marvin_create_task",
 			"marvin_due",
 			"marvin_labels",
@@ -92,6 +115,16 @@ describe("Amazing Marvin MCP", () => {
 				id: "label-1",
 				title: "Knowledge work",
 			}],
+		});
+		expect(categories.structuredContent).toMatchObject({
+			items: [{
+				id: "project-1",
+				parentId: "root",
+				deepLink: "https://app.amazingmarvin.com/#p=project-1",
+			}],
+		});
+		expect(children.structuredContent).toMatchObject({
+			items: [{ id: "child-1", title: "Draft" }],
 		});
 	});
 

@@ -4,21 +4,28 @@ import {
 	MarvinError,
 	MarvinRouteError,
 	type Label,
+	type MarvinItem,
+	type MarvinReadResult,
 	type MarvinRouter,
-	type TaskOrProject,
 	marvinDeepLink,
 } from "@open-horizon/marvin-client";
 
 export type MarvinOperations = Pick<
 	MarvinRouter,
-	"getTodayItems" | "getDueItems" | "getLabels" | "addTask" | "markDone"
+	| "getTodayItems"
+	| "getDueItems"
+	| "getCategories"
+	| "getChildren"
+	| "getLabels"
+	| "addTask"
+	| "markDone"
 >;
 
 const dateSchema = z.string()
 	.regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
 	.optional();
 
-function itemForTool(item: TaskOrProject) {
+function itemForTool(item: MarvinItem) {
 	return {
 		id: item._id,
 		title: item.title,
@@ -26,10 +33,11 @@ function itemForTool(item: TaskOrProject) {
 		done: item.done ?? false,
 		deepLink: marvinDeepLink(item),
 		...(item.parentId === undefined ? {} : { parentId: item.parentId }),
-		...(item.day === undefined ? {} : { day: item.day }),
+		...(!("day" in item) || item.day === undefined ? {} : { day: item.day }),
 		...(item.dueDate === undefined ? {} : { dueDate: item.dueDate }),
 		...(item.startDate === undefined ? {} : { startDate: item.startDate }),
 		...(item.note === undefined ? {} : { note: item.note }),
+		...(item.labelIds === undefined ? {} : { labelIds: item.labelIds }),
 	};
 }
 
@@ -55,7 +63,7 @@ function success(structuredContent: Record<string, unknown>) {
 	};
 }
 
-function readSuccess(result: Awaited<ReturnType<MarvinOperations["getTodayItems"]>>) {
+function readSuccess(result: MarvinReadResult<MarvinItem[]>) {
 	const { data, ...metadata } = result;
 	return success({
 		...metadata,
@@ -124,6 +132,41 @@ export function createMarvinMcpServer(
 	}, async ({ date }) => {
 		try {
 			return readSuccess(await operations.getDueItems(date));
+		} catch (error) {
+			return failure(error);
+		}
+	});
+
+	server.registerTool("marvin_categories", {
+		title: "Amazing Marvin Categories and Projects",
+		description: "Read stable category/project IDs and their parent hierarchy.",
+		inputSchema: {},
+		annotations: {
+			readOnlyHint: true,
+			openWorldHint: true,
+		},
+	}, async () => {
+		try {
+			return readSuccess(await operations.getCategories());
+		} catch (error) {
+			return failure(error);
+		}
+	});
+
+	server.registerTool("marvin_children", {
+		title: "Amazing Marvin Children",
+		description: "Read direct tasks and projects below one stable parent ID.",
+		inputSchema: {
+			parentId: z.string().trim().min(1)
+				.describe("Category/project ID, or unassigned for Inbox"),
+		},
+		annotations: {
+			readOnlyHint: true,
+			openWorldHint: true,
+		},
+	}, async ({ parentId }) => {
+		try {
+			return readSuccess(await operations.getChildren(parentId));
 		} catch (error) {
 			return failure(error);
 		}
