@@ -15,6 +15,8 @@ The Amazing Marvin Plugin provides a way to bring your tasks and project structu
 - **Categories and Projects are folder notes**: Categories and projects are created as folder notes, compatible with [Obsidian folder notes](https://github.com/LostPaul/obsidian-folder-notes).
 - **Task Creation**: Users can create Amazing Marvin tasks directly within Obsidian, with support for standard Marvin shorthand notations like `+` for dates or `@` for labels.
 - **Deep Linking**: Each task and category is equipped with a deep link, providing quick navigation back to Amazing Marvin.
+- **Refreshable Daily Notes**: A bounded Today region keeps scheduled and due tasks current without rerunning the full daily-note template or overwriting surrounding prose.
+- **Automation API**: Templater, in-Obsidian agents, and other plugins can use the same typed operations as the UI, including idempotent source/action task creation.
 
 ## Usage Instructions
 
@@ -46,7 +48,11 @@ The task creation dialog is designed to mirror the task input experience in Amaz
 - Autocomplete for Categories and Projects using `#` syntax or a search sub-dialog.
 - Recognizes shorthand notations for properties like start date (`~`), due date (`@`), and labels (`+`).
 - Places a link to the Marvin task as a deep link in Obsidian at the cursor location upon task creation.
-- The created Marvin task contains an Advanced URI-friendly link back to the Obsidian note that instigated the task.
+- The created Marvin task links back to the Obsidian note that instigated the task.
+- The source note records the Marvin task ID and deep link in its
+  `amazing-marvin-actions` frontmatter property.
+- The link can use either Advanced URI (the default, for the Advanced URI
+  community plugin) or Obsidian's standard URI format.
 
 To create a task:
 
@@ -54,6 +60,65 @@ To create a task:
 2. Search for and select the command `Create Marvin Task`.
 3. Input the task details and select the appropriate category from the dropdown, which shows suggestions as you type.
 4. Upon task creation, a markdown checklist item with a link to the Marvin task is inserted at your cursor location in Obsidian.
+
+### Keeping Today's Tasks Current
+
+Run `Amazing Marvin: Refresh today's tasks` from a daily note. On the first
+run, the plugin adopts existing Marvin checklist entries under
+`## Today's tasks` as the morning set and surrounds only the generated task
+content with managed HTML-comment markers. It never rewrites content outside
+those markers.
+
+Later scheduled and due tasks appear under `### Added since morning`. Results
+are deduplicated by Marvin task ID, completion state is rerendered from Marvin,
+and a successful empty response remains visibly distinct from a fetch failure.
+A failed fetch leaves the existing note untouched.
+
+Once a note has a managed region, the plugin can refresh it on startup, when
+Obsidian regains focus, and at the configured interval. Automatic refresh does
+not initialize or adopt an unmarked note; run the command once (or use the API
+below) to establish the boundary.
+
+### Templater and In-Obsidian Automation
+
+The plugin exposes a stable object API at
+`app.plugins.plugins["cloudatlas-o-am"].api`. For example:
+
+```js
+const marvin = app.plugins.plugins["cloudatlas-o-am"].api;
+const sourcePath = tp.file.path(true);
+
+await marvin.ensureTaskForSource({
+  sourcePath,
+  actionKey: "decide-whether-to-pursue",
+  title: "Decide whether to pursue Titan AI",
+  day: tp.date.now("YYYY-MM-DD"),
+});
+
+await marvin.refreshTodayTasks({
+  date: tp.date.now("YYYY-MM-DD"),
+  filePath: tp.file.path(true),
+});
+```
+
+`actionKey` is a caller-owned stable identity for one action in one source
+note. Do not derive it from the mutable task title. Repeating the same
+`sourcePath` and `actionKey` returns the existing Marvin association.
+
+The API writes a pending source association before creating the Marvin task.
+If a connection drops at an ambiguous point, a repeat is stopped rather than
+silently creating a duplicate. After inspecting Marvin, callers can use
+`resolvePendingSourceAction({ sourcePath, actionKey, taskId })` or explicitly
+`clearPendingSourceAction({ sourcePath, actionKey })`.
+
+Additional object-returning methods are available for automation:
+
+- `getToday(date)`
+- `getDue(date)`
+- `getTodayAndDue(date)`
+- `createTask(task)`
+- `ensureTaskForSource(input)`
+- `refreshTodayTasks(input)`
 
 ### Auto-Mark as Done Feature
 
@@ -157,6 +222,12 @@ The initial tool surface is deliberately small:
 Read results identify whether data is fresh, cached, or stale. Errors retain
 the attempted local/public origins and throttling details. The server uses the
 limited API token only; it does not use Marvin's full-access CouchDB API.
+
+The MCP owns Marvin-only operations and does not edit an Obsidian vault.
+Cross-system operations that must atomically persist a source/action
+association and update a managed note region use the plugin API above. Both
+paths share the Marvin client, and the source/action state machine itself
+lives in that shared package rather than in prompt instructions.
 
 See
 [`docs/architecture/marvin-client-and-mcp.md`](docs/architecture/marvin-client-and-mcp.md)

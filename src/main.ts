@@ -1,6 +1,8 @@
 import {
 	Notice,
 	Plugin,
+	TFile,
+	moment,
 	normalizePath,
 	requestUrl,
 	stringifyYaml,
@@ -14,9 +16,14 @@ import {
 	type AddTaskRequest,
 	type MarvinItem,
 	type MarvinReadResult,
+	type TaskOrProject,
+	type EnsureSourceActionResult,
 	MarvinApiClient,
 	MarvinError,
+	MarvinRouteError,
 	MarvinRouter,
+	SourceActionError,
+	SourceActionService,
 	marvinDeepLink,
 } from "@open-horizon/marvin-client";
 
@@ -27,17 +34,39 @@ import {
 } from "./settings";
 
 import {
-	getDateFromFile
+	getAllDailyNotes,
+	getDailyNote,
+	getDateFromFile,
 } from "obsidian-daily-notes-interface";
 import { amTaskWatcher } from "./amTaskWatcher";
 import { AddTaskModal } from "./addTaskModal";
+import type {
+	AmazingMarvinApi,
+	EnsureTaskForSourceInput,
+	RefreshTodayTasksInput,
+	RefreshTodayTasksResult,
+} from "./api";
+import {
+	buildSourceActionTaskNote,
+} from "./marvin/obsidianLinks";
+import {
+	ObsidianSourceActionStore,
+} from "./marvin/obsidianSourceActions";
 import { createObsidianTransport } from "./marvin/obsidianTransport";
+import {
+	hasTodayRegion,
+	type TodayProjectionItem,
+} from "./marvin/todayProjection";
+import { runTodayProjection } from "./marvin/todayWorkflow";
 
 function getAMTimezoneOffset() {
 	return new Date().getTimezoneOffset() * -1;
 }
 
 const animateNotice = (notice: Notice) => {
+	if (!notice.noticeEl.isConnected) {
+		return;
+	}
 	let message = notice.noticeEl.innerText;
 	const dots = [...message].filter((c) => c === ".").length;
 	if (dots == 0) {
@@ -64,6 +93,41 @@ export default class AmazingMarvinPlugin extends Plugin {
 	categories: Category[] = [];
 	private marvinRouter?: MarvinRouter;
 	private marvinRouterKey = "";
+	private sourceActionStore?: ObsidianSourceActionStore;
+	private sourceActionService?: SourceActionService;
+	private sourceActionRouter?: MarvinRouter;
+	private readonly todayRefreshes = new Map<string, Promise<RefreshTodayTasksResult>>();
+	private lastAutomaticRefreshAt = 0;
+	private lastAutomaticRefreshError = "";
+
+	readonly api: AmazingMarvinApi = {
+		getToday: (date) => this.getMarvinRouter().getTodayItems(date),
+		getDue: (date) => this.getMarvinRouter().getDueItems(date),
+		getTodayAndDue: (date) => this.getMarvinRouter().getTodayAndDue(date),
+		createTask: async (task) => {
+			const created = await this.getMarvinRouter().addTask(task);
+			this.queueManagedTodayRefresh("creating a task");
+			return created;
+		},
+		ensureTaskForSource: (input) => this.ensureTaskForSource(input),
+		resolvePendingSourceAction: async (input) => {
+			const result = await this.getSourceActionService().resolvePending({
+				sourceKey: input.sourcePath,
+				actionKey: input.actionKey,
+				taskId: input.taskId,
+				...(input.title === undefined ? {} : { title: input.title }),
+			});
+			this.queueManagedTodayRefresh("resolving a contextual task");
+			return result;
+		},
+		clearPendingSourceAction: (input) => (
+			this.getSourceActionService().clearPending({
+				sourceKey: input.sourcePath,
+				actionKey: input.actionKey,
+			})
+		),
+		refreshTodayTasks: (input) => this.refreshTodayTasks(input),
+	};
 
 	createFolder = async (path: string) => {
 		try {
@@ -87,6 +151,21 @@ export default class AmazingMarvinPlugin extends Plugin {
 		if (this.settings.attemptToMarkTasksAsDone) {
 			this.registerEditorExtension(amTaskWatcher(this.app, this));
 		}
+		this.registerEvent(this.app.metadataCache.on("changed", (file, _data, cache) => {
+			if (
+				this.sourceActionStore?.shouldInvalidateFor(
+					file.path,
+					cache.frontmatter,
+				)
+			) {
+				this.sourceActionStore.invalidateIndex(true);
+			}
+		}));
+		this.registerEvent(this.app.metadataCache.on("deleted", (file) => {
+			if (this.sourceActionStore?.shouldInvalidateFor(file.path, undefined)) {
+				this.sourceActionStore.invalidateIndex(true);
+			}
+		}));
 
 		this.addCommand({
 			id: "create-task",
@@ -138,36 +217,46 @@ export default class AmazingMarvinPlugin extends Plugin {
       });
 		this.addCommand({
 			id: "import-today",
-			name: "Import today's tasks",
-			editorCallback: async (editor, view) => {
+			name: "Refresh today's tasks",
+			editorCallback: async (_editor, view) => {
 				try {
-					const today = new Date().toISOString().split('T')[0];
-					const fileDate = view.file ? getDateFromFile(view.file, "day")?.format("YYYY-MM-DD") : today;
-
-					const date = fileDate ? fileDate : today;
-					let tasks: (Task | Category)[];
-					if (this.settings.todayTasksToShow === 'both') {
-						const result = await this.getMarvinRouter().getTodayAndDue(date);
-						this.reportReadState(result, "today and due tasks");
-						tasks = result.data.map(item => this.decorateWithDeepLink(item));
-					} else if (this.settings.todayTasksToShow === 'due') {
-						tasks = await this.getDueTasks(date);
-					} else {
-						tasks = await this.getScheduledTasks(date);
+					if (!view.file) {
+						throw new Error("Open the daily note you want to refresh");
 					}
-
-					editor.replaceRange(this.formatItems(tasks, 0, false), editor.getCursor());
+					const fileDate = getDateFromFile(view.file, "day");
+					if (!fileDate) {
+						throw new Error(`${view.file.path} is not recognized as a daily note`);
+					}
+					const date = fileDate.format("YYYY-MM-DD");
+					const result = await this.refreshTodayTasks({
+						date,
+						filePath: view.file.path,
+					});
+					new Notice(
+						result.changed
+							? `Refreshed Amazing Marvin tasks for ${date}.`
+							: `Amazing Marvin tasks for ${date} are already current.`,
+					);
 				} catch (error) {
-					new Notice(`Error importing scheduled tasks: ${error}`);
-					console.error(`Error importing scheduled tasks: ${error}`);
+					new Notice(`Error refreshing today's tasks: ${this.errorMessage(error)}`);
+					console.error("Error refreshing today's tasks:", error);
 				}
 			}
 		});
 
+		this.registerDomEvent(window, "focus", () => {
+			void this.runAutomaticTodayRefresh("window focus");
+		});
+		this.registerInterval(window.setInterval(() => {
+			void this.runAutomaticTodayRefresh("interval");
+		}, 60_000));
+		this.app.workspace.onLayoutReady(() => {
+			void this.runAutomaticTodayRefresh("startup");
+		});
 	}
 	async addMarvinTask(catId: string, taskTitle: string, notePath: string = '', vaultName: string = ''): Promise<Task> {
 		const requestBody: AddTaskRequest = {
-			title: taskTitle,
+			title: taskTitle.trim(),
 			timeZoneOffset: getAMTimezoneOffset(),
 		};
 
@@ -175,21 +264,40 @@ export default class AmazingMarvinPlugin extends Plugin {
 			requestBody.parentId = catId;
 		}
 
-		if (notePath && notePath !== '') {
-			let link = `obsidian://open?file=${encodeURI(notePath)}${vaultName !== '' ? `&vault=${encodeURI(vaultName)}` : ''}`;
-			if (this.settings.linkBackToObsidianText !== '') {
-				requestBody.note = `[${this.settings.linkBackToObsidianText}](${link})`;
-			} else {
-				requestBody.note = link;
-			}
-	}
-
 		try {
-			const task = await this.getMarvinRouter().addTask(requestBody);
+			let task: TaskOrProject;
+			if (notePath) {
+				const actionKey = `manual-${this.newOperationId()}`;
+				requestBody.note = buildSourceActionTaskNote({
+					vaultName: vaultName || this.app.vault.getName(),
+					sourcePath: notePath,
+					actionKey,
+					linkText: this.settings.linkBackToObsidianText,
+					format: this.settings.obsidianLinkFormat,
+				});
+				const ensured = await this.getSourceActionService().ensure({
+					sourceKey: notePath,
+					actionKey,
+					task: requestBody,
+				});
+				if (!ensured.task) {
+					throw new Error(
+						`Manual source action unexpectedly reused Marvin task ${ensured.taskId}`,
+					);
+				}
+				task = ensured.task;
+			} else {
+				task = await this.getMarvinRouter().addTask(requestBody);
+			}
 			new Notice("Task added in Amazing Marvin.");
+			this.queueManagedTodayRefresh("creating a task");
 			return this.decorateWithDeepLink(task) as Task;
 		} catch (error) {
 			console.error('Error creating task:', error);
+			if (error instanceof SourceActionError) {
+				new Notice(error.message, 0);
+				throw error;
+			}
 			this.showManualActionError(
 				this.isThrottle(error)
 					? 'Your request was throttled by Amazing Marvin. Wait before trying again, or do it '
@@ -203,15 +311,18 @@ export default class AmazingMarvinPlugin extends Plugin {
 	onunload() { }
 
 	async loadSettings() {
-		this.settings = Object.assign(
-			DEFAULT_SETTINGS,
-			await this.loadData()
-		);
+		const stored = await this.loadData() as Partial<AmazingMarvinPluginSettings> | null;
+		this.settings = {
+			...DEFAULT_SETTINGS,
+			...(stored ?? {}),
+		};
 	}
 
 	async saveSettings() {
 		this.marvinRouter = undefined;
 		this.marvinRouterKey = "";
+		this.sourceActionService = undefined;
+		this.sourceActionRouter = undefined;
 		await this.saveData(this.settings);
 	}
 
@@ -229,6 +340,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 			note.append(a);
 			note.appendText(' marked as done in Amazing Marvin.');
 			new Notice(note, 5000);
+			this.queueManagedTodayRefresh("completing a task");
 			return result;
 		} catch (error) {
 			console.error('Error marking task as done:', error);
@@ -240,6 +352,204 @@ export default class AmazingMarvinPlugin extends Plugin {
 			);
 			throw error;
 		}
+	}
+
+	async ensureTaskForSource(
+		input: EnsureTaskForSourceInput,
+	): Promise<EnsureSourceActionResult> {
+		const request: AddTaskRequest = {
+			title: input.title.trim(),
+			timeZoneOffset: getAMTimezoneOffset(),
+			note: buildSourceActionTaskNote({
+				vaultName: this.app.vault.getName(),
+				sourcePath: input.sourcePath,
+				actionKey: input.actionKey,
+				linkText: this.settings.linkBackToObsidianText,
+				format: this.settings.obsidianLinkFormat,
+				...(input.note === undefined ? {} : { note: input.note }),
+			}),
+			...(input.parentId === undefined ? {} : { parentId: input.parentId }),
+			...(input.day === undefined ? {} : { day: input.day }),
+			...(input.dueDate === undefined ? {} : { dueDate: input.dueDate }),
+			...(input.labelIds === undefined ? {} : { labelIds: input.labelIds }),
+		};
+		const result = await this.getSourceActionService().ensure({
+			sourceKey: input.sourcePath,
+			actionKey: input.actionKey,
+			task: request,
+		});
+		this.queueManagedTodayRefresh("creating a contextual task");
+		return result;
+	}
+
+	async refreshTodayTasks(
+		input: RefreshTodayTasksInput,
+	): Promise<RefreshTodayTasksResult> {
+		const date = this.requireDate(input.date);
+		const file = this.resolveDailyNote(date, input.filePath);
+		const key = `${file.path}\u0000${date}`;
+		const existing = this.todayRefreshes.get(key);
+		if (existing) {
+			return existing;
+		}
+
+		const pending = this.refreshTodayTasksOnce(date, file).finally(() => {
+			this.todayRefreshes.delete(key);
+		});
+		this.todayRefreshes.set(key, pending);
+		return pending;
+	}
+
+	private async refreshTodayTasksOnce(
+		date: string,
+		file: TFile,
+	): Promise<RefreshTodayTasksResult> {
+		const workflow = await runTodayProjection({
+			date,
+			read: () => this.readTodaySelection(date),
+			project: (data) => this.toTodayProjectionItems(data),
+			process: async (update) => {
+				await this.app.vault.process(file, update);
+			},
+		});
+		const { read, projection } = workflow;
+		this.reportReadState(read, `tasks for ${date}`);
+		return {
+			date,
+			filePath: file.path,
+			changed: projection.changed,
+			createdRegion: projection.createdRegion,
+			morningIds: projection.morningIds,
+			lateIds: projection.lateIds,
+			freshness: read.freshness,
+			origin: read.origin,
+			warnings: read.warnings,
+		};
+	}
+
+	private toTodayProjectionItems(data: TaskOrProject[]): TodayProjectionItem[] {
+		const sourceLinks = this.getSourceActionStore().findLinkedTasks(
+			data.map((item) => item._id),
+		);
+		return data.map((item) => {
+			const deepLink = marvinDeepLink({
+				...item,
+				type: item.type ?? "task",
+			});
+			const source = sourceLinks.get(item._id);
+			const details = this.formatTaskDetails(item as Task, "").trim();
+			return {
+				id: item._id,
+				title: item.title,
+				done: Boolean(item.done),
+				deepLink,
+				...(details ? { details } : {}),
+				...(source === undefined
+					? {}
+					: {
+						sourcePath: source.sourcePath,
+						sourceTitle: item.title,
+					}),
+			};
+		});
+	}
+
+	private async readTodaySelection(
+		date: string,
+	): Promise<MarvinReadResult<TaskOrProject[]>> {
+		if (this.settings.todayTasksToShow === "due") {
+			return this.getMarvinRouter().getDueItems(date);
+		}
+		if (this.settings.todayTasksToShow === "scheduled") {
+			return this.getMarvinRouter().getTodayItems(date);
+		}
+		return this.getMarvinRouter().getTodayAndDue(date);
+	}
+
+	private resolveDailyNote(date: string, filePath?: string): TFile {
+		if (filePath) {
+			const file = this.app.vault.getAbstractFileByPath(filePath);
+			if (!(file instanceof TFile)) {
+				throw new Error(`Daily note not found: ${filePath}`);
+			}
+			return file;
+		}
+		const file = getDailyNote(
+			moment(date, "YYYY-MM-DD", true),
+			getAllDailyNotes(),
+		);
+		if (!file) {
+			throw new Error(`No daily note exists for ${date}`);
+		}
+		return file;
+	}
+
+	private requireDate(date: string): string {
+		const normalized = date.trim();
+		if (!moment(normalized, "YYYY-MM-DD", true).isValid()) {
+			throw new Error(`Expected a date in YYYY-MM-DD format, received: ${date}`);
+		}
+		return normalized;
+	}
+
+	private async runAutomaticTodayRefresh(reason: string): Promise<void> {
+		if (!this.settings.autoRefreshTodayTasks) {
+			return;
+		}
+		const now = Date.now();
+		const minimumDelay = reason === "interval"
+			? Math.max(1, this.settings.todayRefreshIntervalMinutes) * 60_000
+			: 15_000;
+		if (now - this.lastAutomaticRefreshAt < minimumDelay) {
+			return;
+		}
+		this.lastAutomaticRefreshAt = now;
+		try {
+			await this.refreshManagedTodayIfPresent();
+			this.lastAutomaticRefreshError = "";
+		} catch (error) {
+			const message = this.errorMessage(error);
+			console.warn(
+				`Could not automatically refresh Amazing Marvin tasks after ${reason}:`,
+				error,
+			);
+			if (message !== this.lastAutomaticRefreshError) {
+				this.lastAutomaticRefreshError = message;
+				new Notice(
+					`Amazing Marvin automatic refresh failed; the existing daily-note tasks were left unchanged. ${message}`,
+					10_000,
+				);
+			}
+		}
+	}
+
+	private async refreshManagedTodayIfPresent(): Promise<boolean> {
+		const date = moment().format("YYYY-MM-DD");
+		let file: TFile;
+		try {
+			file = this.resolveDailyNote(date);
+		} catch {
+			return false;
+		}
+		const content = await this.app.vault.cachedRead(file);
+		if (!hasTodayRegion(content, date)) {
+			return false;
+		}
+		await this.refreshTodayTasks({ date, filePath: file.path });
+		return true;
+	}
+
+	private queueManagedTodayRefresh(context: string): void {
+		void this.refreshManagedTodayIfPresent().catch((error) => {
+			console.warn(
+				`Amazing Marvin succeeded at ${context}, but the managed daily-note refresh failed:`,
+				error,
+			);
+			new Notice(
+				`Amazing Marvin succeeded at ${context}, but today's managed task region could not be refreshed. ${this.errorMessage(error)}`,
+				10_000,
+			);
+		});
 	}
 
 
@@ -486,6 +796,24 @@ export default class AmazingMarvinPlugin extends Plugin {
 		return this.marvinRouter;
 	}
 
+	private getSourceActionStore(): ObsidianSourceActionStore {
+		this.sourceActionStore ??= new ObsidianSourceActionStore(this.app);
+		return this.sourceActionStore;
+	}
+
+	private getSourceActionService(): SourceActionService {
+		const router = this.getMarvinRouter();
+		if (this.sourceActionService && this.sourceActionRouter === router) {
+			return this.sourceActionService;
+		}
+		this.sourceActionService = new SourceActionService({
+			router,
+			store: this.getSourceActionStore(),
+		});
+		this.sourceActionRouter = router;
+		return this.sourceActionService;
+	}
+
 	private reportReadState<T>(result: MarvinReadResult<T>, description: string) {
 		if (result.freshness === "stale") {
 			new Notice(
@@ -502,7 +830,25 @@ export default class AmazingMarvinPlugin extends Plugin {
 	}
 
 	private isThrottle(error: unknown): boolean {
-		return error instanceof MarvinError && error.status === 429;
+		if (error instanceof MarvinError) {
+			return error.status === 429;
+		}
+		if (error instanceof MarvinRouteError) {
+			return error.attempts.some((attempt) => attempt.status === 429);
+		}
+		if (error instanceof SourceActionError) {
+			return this.isThrottle(error.cause);
+		}
+		return false;
+	}
+
+	private newOperationId(): string {
+		return globalThis.crypto?.randomUUID?.()
+			?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+	}
+
+	private errorMessage(error: unknown): string {
+		return error instanceof Error ? error.message : String(error);
 	}
 
 	private showManualActionError(message: string, href: string) {
