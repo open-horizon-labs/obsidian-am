@@ -2,6 +2,7 @@ import {
 	Notice,
 	Plugin,
 	TFile,
+	TFolder,
 	moment,
 	normalizePath,
 	requestUrl,
@@ -50,6 +51,17 @@ import {
 	buildSourceActionTaskNote,
 } from "./marvin/obsidianLinks";
 import {
+	managedImportItemId,
+	marvinFrontmatter,
+	refreshCategoryRegion,
+	repairLegacyMarvinFrontmatter,
+	updateMarvinFrontmatter,
+} from "./marvin/categoryProjection";
+import {
+	categoryNotePath,
+	normalizeManagedFolder,
+} from "./marvin/categoryPaths";
+import {
 	ObsidianSourceActionStore,
 } from "./marvin/obsidianSourceActions";
 import { createObsidianTransport } from "./marvin/obsidianTransport";
@@ -81,11 +93,6 @@ const animateNotice = (notice: Notice) => {
 	notice.setMessage(message);
 	setTimeout(() => animateNotice(notice), 500);
 };
-
-const CONSTANTS = {
-	baseDir: "AmazingMarvin",
-};
-
 
 export default class AmazingMarvinPlugin extends Plugin {
 
@@ -555,15 +562,10 @@ export default class AmazingMarvinPlugin extends Plugin {
 
 	async sync() {
 		const categories = await this.getCategories();
-		const baseDirPath = normalizePath(CONSTANTS.baseDir);
-		const baseDir = this.app.vault.getAbstractFileByPath(baseDirPath);
-		if (baseDir) {
-			await this.app.vault.delete(baseDir, true);
-		}
-
 		this.categories = categories;
-		await this.processCategories();
-		await this.processInbox();
+		const existingFiles = await this.findManagedImportFiles();
+		await this.processCategories(existingFiles);
+		await this.processInbox(existingFiles);
 	}
 
 	async getCategories(): Promise<Category[]> {
@@ -602,71 +604,85 @@ export default class AmazingMarvinPlugin extends Plugin {
 		} as Task | Category;
 	}
 
-	async processInbox() {
+	async processInbox(existingFiles: Map<string, TFile>) {
 		const inboxItems = await this.getChildren("unassigned");
 		const content = this.formatItems(inboxItems);
-
-		// Define the path for the Inbox file
-		const inboxFilePath = normalizePath("AmazingMarvin/Inbox.md");
-
-		await this.createOrUpdate(inboxFilePath, content);
+		const inboxFilePath = normalizePath(`${this.getSyncBaseDir()}/Inbox.md`);
+		await this.moveManagedFile(existingFiles.get("unassigned"), inboxFilePath);
+		await this.createOrUpdateManaged(
+			inboxFilePath,
+			"unassigned",
+			content,
+			"inbox",
+			{
+				_id: "unassigned",
+				type: "inbox",
+				title: "Inbox",
+			},
+		);
 	}
 
-	async createOrUpdate(path: string, content: string) {
+	async createOrUpdateManaged(
+		path: string,
+		itemId: string,
+		rendered: string,
+		legacyKind: "category" | "inbox",
+		item?: object,
+	) {
 		const normalizedPath = normalizePath(path);
-		let dirPath = normalizedPath.replace(/^(.+)\/[^\/]*?$/, '$1');
-
-		// Ensure the directory exists
-		if (!await this.app.vault.adapter.exists(dirPath)) {
-			await this.app.vault.createFolder(dirPath);
+		await this.ensureParentFolder(normalizedPath);
+		let file = this.app.vault.getAbstractFileByPath(normalizedPath);
+		if (file && !(file instanceof TFile)) {
+			throw new Error(`Cannot write Amazing Marvin note over folder: ${normalizedPath}`);
+		}
+		if (!file) {
+			const frontmatter = item
+				? `---\n${stringifyYaml(marvinFrontmatter({ ...item })).trimEnd()}\n---\n`
+				: "";
+			const projected = refreshCategoryRegion(frontmatter, {
+				itemId,
+				rendered,
+				legacyKind,
+			});
+			await this.app.vault.create(normalizedPath, projected.content);
+			return;
 		}
 
-		// Overwrite existing file
-		if (await this.app.vault.adapter.exists(normalizedPath)) {
-			const existingContent = await this.app.vault.adapter.remove(normalizedPath);
+		await this.app.vault.process(file, repairLegacyMarvinFrontmatter);
+		if (item) {
+			await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+				updateMarvinFrontmatter(frontmatter, { ...item });
+			});
 		}
-
-		await this.app.vault.create(normalizedPath, content);
+		await this.app.vault.process(file, (content) => (
+			refreshCategoryRegion(content, {
+				itemId,
+				rendered,
+				legacyKind,
+			}).content
+		));
 	}
 
 	getPathForCategory(category: Category) {
-		let pathSegments: string[] = [];
-
-		// Function to recursively build the path segments array
-		const buildPathSegments = (cat: Category) => {
-			const safeTitle = cat.title.replace(/[^a-zA-Z0-9 -]/g, "");
-			pathSegments.unshift(safeTitle); // Add at the beginning
-
-			if (cat.parentId && cat.parentId !== "root") {
-				const parentCat = this.categories.find(c => c._id === cat.parentId);
-				if (parentCat) {
-					buildPathSegments(parentCat);
-				}
-			}
-		};
-
-		buildPathSegments(category);
-
-		// Determine the filename and if the category should be a folder based on its children
-		const hasChildCategoriesOrProjects = this.categories.some(cat =>
-			cat.parentId === category._id && (cat.type === 'project' || cat.type === 'category')
-		);
-
-		// If the category has children that are categories or projects, make it a folder
-		const isFolder = hasChildCategoriesOrProjects;
-
-		// Construct the path
-		let path = `${CONSTANTS.baseDir}/${pathSegments.join('/')}`;
-		path = isFolder ? `${path}/${category.title}.md` : `${path}.md`;
-
-		return normalizePath(path);
+		return normalizePath(categoryNotePath(
+			category,
+			this.categories,
+			this.getSyncBaseDir(),
+		));
 	}
 
-	async processCategories() {
+	async processCategories(existingFiles: Map<string, TFile>) {
 		for (const category of this.categories) {
 			const path = this.getPathForCategory(category);
-			const content = this.createContentForCategory(category);
-			await this.createOrUpdate(path, await content);
+			await this.moveManagedFile(existingFiles.get(category._id), path);
+			const content = await this.createContentForCategory(category);
+			await this.createOrUpdateManaged(
+				path,
+				category._id,
+				content,
+				"category",
+				category,
+			);
 		}
 	}
 
@@ -681,7 +697,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 			if (isCategoryOrProject) {
 				// Handle category or project formatting
 				const path = this.getPathForCategory(item);
-				categoryContent += `${indentation}- [[${path}|${item.title}]] [⚓](${item.deepLink})\n`;
+				categoryContent += `${indentation}- [[${this.wikiTarget(path)}|${this.wikiAlias(item.title)}]] [⚓](${item.deepLink})\n`;
 			} else {
 				if (!isSubtask) { // Only add deep links to top-level tasks
 					taskContent += `${indentation}- [${item.done ? 'x' : ' '}] [⚓](${item.deepLink}) ${this.formatTaskDetails(item as Task, indentation)}`;
@@ -689,7 +705,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 					taskContent += `${indentation}- [${item.done ? 'x' : ' '}] `;
 				}
 
-				taskContent += `${item.title}\n`;
+				taskContent += `${this.inlineMarkdown(item.title)}\n`;
 
 				// Recursively format sub-tasks if any
 				if ('subtasks' in item && item.subtasks && Object.keys(item.subtasks).length > 0) {
@@ -734,31 +750,110 @@ export default class AmazingMarvinPlugin extends Plugin {
 	}
 
 	async createContentForCategory(category: Category): Promise<string> {
-		let yamlFrontmatter = "---\n";
-		// Iterate over category properties and add non-null values to YAML frontmatter
-		for (const [key, value] of Object.entries(category)) {
-			if (value !== null && value !== undefined) {
-				yamlFrontmatter += `${key}: ${stringifyYaml(value)}\n`;
-			}
-		}
-
-		// Close YAML frontmatter block
-		yamlFrontmatter += "---\n";
-
-		let content = `# [⚓](${category.deepLink}) ${category.title}\n\n`;
+		let content = `# [⚓](${category.deepLink}) ${this.inlineMarkdown(category.title)}\n\n`;
 
 		// Link to parent category, if it exists
 		if (category.parentId && category.parentId !== "root") {
 			const parentCategory = this.categories.find(cat => cat._id === category.parentId);
 			if (parentCategory) {
-				content += `Back to [[${parentCategory.title}]]\n\n`;
+				content += `Back to [[${this.wikiTarget(this.getPathForCategory(parentCategory))}|${this.wikiAlias(parentCategory.title)}]]\n\n`;
 			}
 		}
 		// Fetch and format tasks
 		const children = await this.getChildren(category._id);
 		content += this.formatItems(children);
 
-		return yamlFrontmatter + content;
+		return content;
+	}
+
+	private getSyncBaseDir(): string {
+		return normalizePath(normalizeManagedFolder(this.settings.syncFolder));
+	}
+
+	private async ensureParentFolder(path: string): Promise<void> {
+		const separator = path.lastIndexOf("/");
+		if (separator === -1) {
+			return;
+		}
+		const segments = path.slice(0, separator).split("/");
+		let current = "";
+		for (const segment of segments) {
+			current = current ? `${current}/${segment}` : segment;
+			const existing = this.app.vault.getAbstractFileByPath(current);
+			if (existing && !(existing instanceof TFolder)) {
+				throw new Error(
+					`Cannot create Amazing Marvin folder ${current}; a vault file already exists there`,
+				);
+			}
+			if (!existing) {
+				await this.app.vault.createFolder(current);
+			}
+		}
+	}
+
+	private async moveManagedFile(
+		existing: TFile | undefined,
+		destination: string,
+	): Promise<void> {
+		if (!existing || existing.path === destination) {
+			return;
+		}
+		await this.ensureParentFolder(destination);
+		const collision = this.app.vault.getAbstractFileByPath(destination);
+		if (collision && collision !== existing) {
+			throw new Error(
+				`Cannot move ${existing.path} to ${destination}; another vault item already exists there`,
+			);
+		}
+		await this.app.fileManager.renameFile(existing, destination);
+	}
+
+	private inlineMarkdown(value: string): string {
+		return value
+			.replace(/[\r\n]+/g, " ")
+			.replace(/<!--/g, "&lt;!--")
+			.replace(/-->/g, "--&gt;")
+			.trim();
+	}
+
+	private wikiAlias(value: string): string {
+		return this.inlineMarkdown(value)
+			.replace(/\|/g, "\\|")
+			.replace(/\]/g, "\\]");
+	}
+
+	private wikiTarget(value: string): string {
+		return value.replace(/\|/g, "\\|").replace(/\]/g, "\\]");
+	}
+
+	private async findManagedImportFiles(): Promise<Map<string, TFile>> {
+		const byId = new Map<string, TFile>();
+		const rootsToInspect = new Set([
+			`${this.getSyncBaseDir()}/`,
+			"AmazingMarvin/",
+		]);
+		for (const file of this.app.vault.getMarkdownFiles()) {
+			const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+			let itemId = managedImportItemId("", frontmatter, file.path);
+			if (
+				!itemId
+				&& [...rootsToInspect].some((root) => file.path.startsWith(root))
+			) {
+				const content = await this.app.vault.cachedRead(file);
+				itemId = managedImportItemId(content, frontmatter, file.path);
+			}
+			if (!itemId) {
+				continue;
+			}
+			const duplicate = byId.get(itemId);
+			if (duplicate && duplicate.path !== file.path) {
+				throw new Error(
+					`Multiple Obsidian notes claim Amazing Marvin item ${itemId}: ${duplicate.path} and ${file.path}`,
+				);
+			}
+			byId.set(itemId, file);
+		}
+		return byId;
 	}
 
 	private getMarvinRouter(): MarvinRouter {
