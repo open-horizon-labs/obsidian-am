@@ -5,6 +5,19 @@ This plugin brings Amazing Marvin tasks, categories, and projects into
 also includes a companion MCP server for agents that need Marvin access
 without mutating an Obsidian vault.
 
+## Use Marvin, Obsidian, and an agent together
+
+Amazing Marvin remains the task system of record. The Obsidian plugin projects
+that work into notes you can use for context and execution. The companion MCP
+lets an agent work directly with Marvin: discover a project by stable ID, read
+its work, create a task, or complete it.
+
+Use the plugin for vault-coupled work such as imports, managed daily-note
+regions, and source-note associations. Use the MCP for Marvin-only work. The
+two surfaces share the same client, local-first read behavior, cache rules, and
+error model. Run the relevant plugin refresh or import to project a task an
+agent creates through MCP into the vault.
+
 ## Amazing Marvin Plugin Overview
 
 The Amazing Marvin Plugin provides a way to bring your tasks and project structures from Amazing Marvin directly into your Obsidian vault. It respects the Amazing Marvin hierarchy of categories and projects, creating a matching folder and note structure within Obsidian.
