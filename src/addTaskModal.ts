@@ -1,4 +1,12 @@
-import { App, Modal, Setting, DropdownComponent, TextAreaComponent, FuzzySuggestModal, FuzzyMatch, Notice } from "obsidian";
+import {
+  App,
+  FuzzyMatch,
+  FuzzySuggestModal,
+  Modal,
+  Notice,
+  Setting,
+  TextAreaComponent,
+} from "obsidian";
 import { Category } from "./interfaces";
 
 const inboxCategory: Category = {
@@ -98,7 +106,7 @@ export class AddTaskModal extends Modal {
         ) ?? inboxCategory;
         text.setValue(selectedCategory.title);
         this.result.catId = selectedCategory._id;
-        text.onChange(value => {
+        text.onChange(_value => {
           const suggester = new CategorySuggesterModal(this.app, this.categories, (item: Category) => {
             categoryInput.value = item.title;
             this.result.catId = item._id;
@@ -118,7 +126,7 @@ export class AddTaskModal extends Modal {
         });
       }).settingEl.addClass("am-task-textarea-setting");
 
-    const shortcutsDesc = document.createDocumentFragment();
+    const shortcutsDesc = createFragment();
     shortcutsDesc.appendText('The Task field accepts labels (@), time estimates (~), and scheduled dates (+). See ');
     shortcutsDesc.appendChild(this.getShortcutsLink());
     shortcutsDesc.appendText('.');
@@ -158,7 +166,7 @@ export class AddTaskModal extends Modal {
 
 
   private getShortcutsLink(): HTMLAnchorElement {
-    const a = document.createElement('a');
+    const a = activeDocument.createElement('a');
     a.href = 'https://help.amazingmarvin.com/en/articles/1949399-using-shortcuts-while-creating-a-task';
     a.text = 'Using shortcuts while creating a task';
     a.target = '_blank';

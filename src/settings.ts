@@ -125,7 +125,7 @@ export class AmazingMarvinSettingsTab extends PluginSettingTab {
 	// refactor a function for link creation that takes the href and text as parameters
 
 private a(href: string, text: string) {
-	const a = document.createElement('a');
+	const a = activeDocument.createElement('a');
 	a.href = href;
 	a.text = text;
 	a.target = '_blank';
@@ -137,7 +137,7 @@ private a(href: string, text: string) {
 
 		containerEl.empty();
 
-		const TokenDescEl = document.createDocumentFragment();
+		const TokenDescEl = createFragment();
 		TokenDescEl.appendText('Get your Token at the ');
 		TokenDescEl.appendChild(this.a('https://app.amazingmarvin.com/pre?api', 'API page'));
 
@@ -313,10 +313,10 @@ private a(href: string, text: string) {
 			.setHeading().setName("Task creation");
 
 
-		const noteLink = document.createDocumentFragment();
+		const noteLink = createFragment();
 		// make this text much shorter
 		noteLink.appendText('Text for note back to Obsidian on tasks created with this plugin. If empty, a link be added.');
-		noteLink.append(document.createElement('br'));
+		noteLink.append(activeDocument.createElement('br'));
 
 		new Setting(containerEl)
 			.setName("Note link text")
@@ -452,7 +452,7 @@ private a(href: string, text: string) {
 			);
 
 		if (Platform.isDesktopApp) {
-			const lsDescEl = document.createDocumentFragment();
+			const lsDescEl = createFragment();
 			lsDescEl.appendText('The local API can speed up the plugin. See the ');
 			lsDescEl.appendChild(this.a('https://help.amazingmarvin.com/en/articles/5165191-desktop-local-api-server', 'Desktop Local API Server'));
 			lsDescEl.appendText(' for more information.');
