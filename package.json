@@ -2,17 +2,27 @@
   "name": "cloud-atlas-am",
   "version": "0.9.9",
   "description": "Interoperability between Obsidian and Amazing Marvin",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "main": "dist/main.js",
   "scripts": {
-    "dev": "node esbuild.config.mjs",
-    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-    "dev-build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs dev-build",
+    "build": "npm run build:client && npm run build:plugin && npm run build:mcp",
+    "build:client": "npm run build --workspace @open-horizon/marvin-client",
+    "build:mcp": "npm run build --workspace @open-horizon/marvin-mcp",
+    "build:plugin": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "dev": "npm run build:client && node esbuild.config.mjs",
+    "dev-build": "npm run build:client && tsc -noEmit -skipLibCheck && node esbuild.config.mjs dev-build",
+    "test": "npm run build:client && vitest run",
+    "typecheck": "npm run build:client && tsc -noEmit -skipLibCheck && npm run typecheck --workspaces --if-present",
     "version": "node version-bump.mjs && git add manifest.json versions.json"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@open-horizon/marvin-client": "file:packages/marvin-client",
     "obsidian-daily-notes-interface": "^0.9.4"
   },
   "devDependencies": {
@@ -23,6 +33,7 @@
     "esbuild": "^0.19.7",
     "obsidian": "^1.4.11",
     "tslib": "^2.6.2",
-    "typescript": "^5.3.2"
+    "typescript": "^5.3.2",
+    "vitest": "^1.6.1"
   }
 }

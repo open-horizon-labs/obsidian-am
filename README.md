@@ -106,11 +106,66 @@ By following these guidelines, you can ensure your Amazing Marvin data is accura
 3. Run `npm install` to install the dependencies.
 4. Make your desired changes.
 5. Use `npm run dev` to watch for changes and compile the plugin to `dist/main.js`.
+6. Run `npm test` for the shared-client, plugin-adapter, and MCP contract tests.
+7. Run `npm run build` to build the shared client, Obsidian plugin, and MCP server.
 
 For more detailed development instructions, refer to the [sample plugin](https://github.com/obsidianmd/obsidian-sample-plugin) provided by Obsidian.
+
+## Companion MCP server
+
+The repository includes a local stdio MCP server for direct LLM access to
+Amazing Marvin. Marvin-only operations do not need to pass through Obsidian.
+The MCP and plugin use the same typed client, local/public routing, cache, and
+error behavior.
+
+Build it with:
+
+```sh
+npm install
+npm run build
+```
+
+Then configure an MCP host with an absolute path to the generated server:
+
+```json
+{
+  "mcpServers": {
+    "amazing-marvin": {
+      "command": "node",
+      "args": ["/absolute/path/to/obsidian-am/packages/marvin-mcp/dist/server.js"],
+      "env": {
+        "AMAZING_MARVIN_API_TOKEN": "your-limited-api-token",
+        "AMAZING_MARVIN_USE_LOCAL": "true"
+      }
+    }
+  }
+}
+```
+
+`AMAZING_MARVIN_USE_LOCAL` is optional and defaults to `false`. When enabled,
+reads try `http://localhost:12082/api` before the public API. Override the
+origins with `AMAZING_MARVIN_LOCAL_API_URL` and
+`AMAZING_MARVIN_PUBLIC_API_URL`.
+
+The initial tool surface is deliberately small:
+
+- `marvin_today`
+- `marvin_due`
+- `marvin_create_task`
+- `marvin_mark_done`
+
+Read results identify whether data is fresh, cached, or stale. Errors retain
+the attempted local/public origins and throttling details. The server uses the
+limited API token only; it does not use Marvin's full-access CouchDB API.
+
+See
+[`docs/architecture/marvin-client-and-mcp.md`](docs/architecture/marvin-client-and-mcp.md)
+for package boundaries and the #51 extension seam.
 
 ### Testing
 
 While you're testing, you're going to send a lot of requests to the Amazing Marvin API. To avoid hitting the rate limit, you can use the Desktop local API server. See [Desktop Local API Server](https://help.amazingmarvin.com/en/articles/5165191-desktop-local-api-server) for more information. Once setup, you can specify the local API server in the plugin settings.
 
-Note that the `/api/children` endpoint is not available in the local API server, always returning 404. I've followed up with the Amazing Marvin team to see if this can be added.
+The desktop API implements a subset of the public API. Unsupported local read
+endpoints, historically including `/api/children`, fall back to the public
+API. A valid empty local response does not trigger fallback.

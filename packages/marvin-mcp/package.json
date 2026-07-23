@@ -1,0 +1,23 @@
+{
+  "name": "@open-horizon/marvin-mcp",
+  "version": "0.1.0",
+  "description": "In-repository MCP adapter for the shared Amazing Marvin client",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "amazing-marvin-mcp": "./dist/server.js"
+  },
+  "main": "./dist/server.js",
+  "types": "./dist/server.d.ts",
+  "scripts": {
+    "build": "npm run clean && esbuild src/server.ts --bundle --platform=node --target=node18 --format=esm --packages=external --banner:js='#!/usr/bin/env node' --outfile=dist/server.js && tsc --project tsconfig.json --emitDeclarationOnly",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "typecheck": "tsc --project tsconfig.test.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@open-horizon/marvin-client": "file:../marvin-client",
+    "zod": "^4.4.3"
+  },
+  "license": "MIT"
+}

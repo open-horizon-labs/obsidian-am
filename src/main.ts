@@ -3,13 +3,22 @@ import {
 	Plugin,
 	normalizePath,
 	requestUrl,
-  stringifyYaml,
+	stringifyYaml,
 } from "obsidian";
 
 import {
 	Category,
 	Task
 } from "./interfaces";
+import {
+	type AddTaskRequest,
+	type MarvinItem,
+	type MarvinReadResult,
+	MarvinApiClient,
+	MarvinError,
+	MarvinRouter,
+	marvinDeepLink,
+} from "@open-horizon/marvin-client";
 
 import {
 	AmazingMarvinSettingsTab,
@@ -22,6 +31,7 @@ import {
 } from "obsidian-daily-notes-interface";
 import { amTaskWatcher } from "./amTaskWatcher";
 import { AddTaskModal } from "./addTaskModal";
+import { createObsidianTransport } from "./marvin/obsidianTransport";
 
 function getAMTimezoneOffset() {
 	return new Date().getTimezoneOffset() * -1;
@@ -45,18 +55,15 @@ const animateNotice = (notice: Notice) => {
 
 const CONSTANTS = {
 	baseDir: "AmazingMarvin",
-	categoriesEndpoint: '/api/categories',
-	childrenEndpoint: '/api/children',
-	scheduledOnDayEndpoint: '/api/todayItems',
-	dueOnDayEndpoint: '/api/dueItems',
-	addTaskEndpoint: '/api/addTask',
-}
+};
 
 
 export default class AmazingMarvinPlugin extends Plugin {
 
 	settings: AmazingMarvinPluginSettings;
 	categories: Category[] = [];
+	private marvinRouter?: MarvinRouter;
+	private marvinRouterKey = "";
 
 	createFolder = async (path: string) => {
 		try {
@@ -93,26 +100,20 @@ export default class AmazingMarvinPlugin extends Plugin {
               const task = await this.addMarvinTask('', editor.getSelection(), view.file?.path, this.app.vault.getName());
               editor.replaceSelection(`- [${task.done ? 'x' : ' '}] [⚓](${task.deepLink}) ${this.formatTaskDetails(task as Task, '')} ${task.title}`);
             } catch (error) {
-              new Notice('Could not create Marvin task: ' + error.message);
+              console.error('Could not create Marvin task:', error);
             }
             return;
           }
 
-          const categories = await this.fetchTasksAndCategories(CONSTANTS.categoriesEndpoint);
-          // Ensure categories are fetched before initializing the modal
-          if (categories.length > 0) {
-            new AddTaskModal(this.app, categories, async (taskDetails: { catId: string, task: string }) => {
-              try {
-                const task = await this.addMarvinTask(taskDetails.catId, taskDetails.task, view.file?.path, this.app.vault.getName());
-                editor.replaceRange(`- [${task.done ? 'x' : ' '}] [⚓](${task.deepLink}) ${this.formatTaskDetails(task as Task, '')} ${task.title}`, editor.getCursor());
-              } catch (error) {
-                new Notice('Could not create Marvin task: ' + error.message);
-              }
-            }).open();
-          } else {
-            // Handle the case where categories could not be loaded
-            new Notice('Failed to load categories from Amazing Marvin.');
-          }
+          const categories = await this.getCategories();
+          new AddTaskModal(this.app, categories, async (taskDetails: { catId: string, task: string }) => {
+            try {
+              const task = await this.addMarvinTask(taskDetails.catId, taskDetails.task, view.file?.path, this.app.vault.getName());
+              editor.replaceRange(`- [${task.done ? 'x' : ' '}] [⚓](${task.deepLink}) ${this.formatTaskDetails(task as Task, '')} ${task.title}`, editor.getCursor());
+            } catch (error) {
+              console.error('Could not create Marvin task:', error);
+            }
+          }).open();
         } catch (error) {
           console.error('Error fetching categories:', error);
           new Notice('Failed to load categories from Amazing Marvin.');
@@ -144,17 +145,18 @@ export default class AmazingMarvinPlugin extends Plugin {
 					const fileDate = view.file ? getDateFromFile(view.file, "day")?.format("YYYY-MM-DD") : today;
 
 					const date = fileDate ? fileDate : today;
-					let tasks = new Set<Task | Category>();
-					if (this.settings.todayTasksToShow === 'due' || this.settings.todayTasksToShow === 'both') {
-						const dueTasks = await this.getDueTasks(date);
-						dueTasks.forEach(task => tasks.add(task));;
-					}
-					if (this.settings.todayTasksToShow === 'scheduled' || this.settings.todayTasksToShow === 'both') {
-						const scheduledTasks = await this.getScheduledTasks(date);
-						scheduledTasks.forEach(task => tasks.add(task));;
+					let tasks: (Task | Category)[];
+					if (this.settings.todayTasksToShow === 'both') {
+						const result = await this.getMarvinRouter().getTodayAndDue(date);
+						this.reportReadState(result, "today and due tasks");
+						tasks = result.data.map(item => this.decorateWithDeepLink(item));
+					} else if (this.settings.todayTasksToShow === 'due') {
+						tasks = await this.getDueTasks(date);
+					} else {
+						tasks = await this.getScheduledTasks(date);
 					}
 
-					editor.replaceRange(this.formatItems(Array.from(tasks), 0, false), editor.getCursor());
+					editor.replaceRange(this.formatItems(tasks, 0, false), editor.getCursor());
 				} catch (error) {
 					new Notice(`Error importing scheduled tasks: ${error}`);
 					console.error(`Error importing scheduled tasks: ${error}`);
@@ -164,9 +166,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 
 	}
 	async addMarvinTask(catId: string, taskTitle: string, notePath: string = '', vaultName: string = ''): Promise<Task> {
-		const opt = this.settings;
-
-		let requestBody: any = {
+		const requestBody: AddTaskRequest = {
 			title: taskTitle,
 			timeZoneOffset: getAMTimezoneOffset(),
 		};
@@ -185,45 +185,19 @@ export default class AmazingMarvinPlugin extends Plugin {
 	}
 
 		try {
-			const remoteResponse = await requestUrl({
-				url: `https://serv.amazingmarvin.com/api/addTask`,
-				method: 'POST',
-				headers: {
-					'X-API-Token': opt.apiKey,
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify(requestBody)
-			});
-
-			if (remoteResponse.status === 200) {
-				new Notice("Task added in Amazing Marvin.");
-				return this.decorateWithDeepLink(remoteResponse.json) as Task;
-			} else if (remoteResponse.status === 429) {
-
-				const errorNote = document.createDocumentFragment();
-				errorNote.appendText('Your request was throttled by Amazing Marvin. Wait a few minutes and try again. Or do it ');
-				const a = document.createElement('a');
-				a.href = 'https://app.amazingmarvin.com/';
-				a.text = 'manually';
-				a.target = '_blank';
-				errorNote.appendChild(a);
-				errorNote.appendText('.');
-				new Notice(errorNote,);
-			}
+			const task = await this.getMarvinRouter().addTask(requestBody);
+			new Notice("Task added in Amazing Marvin.");
+			return this.decorateWithDeepLink(task) as Task;
 		} catch (error) {
-			const errorNote = document.createDocumentFragment();
-			errorNote.appendText('Error creating task in Amazing Marvin. You can try again or do it ');
 			console.error('Error creating task:', error);
-			const a = document.createElement('a');
-			a.href = 'https://app.amazingmarvin.com/';
-			a.text = 'manually';
-			a.target = '_blank';
-			errorNote.appendChild(a);
-			errorNote.appendText('.');
-
-			new Notice(errorNote, 0);
+			this.showManualActionError(
+				this.isThrottle(error)
+					? 'Your request was throttled by Amazing Marvin. Wait before trying again, or do it '
+					: 'Error creating task in Amazing Marvin. You can try again or do it ',
+				'https://app.amazingmarvin.com/',
+			);
+			throw error;
 		}
-		return Promise.reject(new Error('Error creating task'));
 	}
 
 	onunload() { }
@@ -235,183 +209,91 @@ export default class AmazingMarvinPlugin extends Plugin {
 		);
 	}
 
-	saveSettings() {
-		this.saveData(this.settings);
+	async saveSettings() {
+		this.marvinRouter = undefined;
+		this.marvinRouterKey = "";
+		await this.saveData(this.settings);
 	}
 
 	async markDone(taskId: string) {
-		const opt = this.settings;
-		const requestBody = {
-			itemId: taskId,
-			timeZoneOffset: getAMTimezoneOffset()
-		};
-
 		try {
-			const remoteResponse = await requestUrl({
-				url: `https://serv.amazingmarvin.com/api/markDone`,
-				method: 'POST',
-				headers: {
-					'X-API-Token': opt.apiKey,
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify(requestBody)
-			});
-
+			const result = await this.getMarvinRouter().markDone(
+				taskId,
+				getAMTimezoneOffset(),
+			);
 			const note = document.createDocumentFragment();
 			const a = document.createElement('a');
 			a.href = 'https://app.amazingmarvin.com/#t=' + taskId;
-
 			a.target = '_blank';
-
-			if (remoteResponse.status === 200) {
-				a.text = 'Task';
-				note.append(a);
-				note.appendText(' marked as done in Amazing Marvin.');
-				new Notice(note, 5000);
-				return remoteResponse.json;
-			} else if (remoteResponse.status === 429) {
-				a.text = 'manually';
-				note.appendText('Your request was throttled by Amazing Marvin. Do it manually at ');
-				console.error('Your request was throttled by Amazing Marvin. Wait a few minutes and try again. Or do it manually.');
-				note.appendChild(a);
-
-				new Notice(note, 0);
-			}
+			a.text = 'Task';
+			note.append(a);
+			note.appendText(' marked as done in Amazing Marvin.');
+			new Notice(note, 5000);
+			return result;
 		} catch (error) {
-			const errorNote = document.createDocumentFragment();
-			errorNote.appendText('Error marking task as done in Amazing Marvin. You should do it ');
 			console.error('Error marking task as done:', error);
-
-			const a = document.createElement('a');
-			a.href = 'https://app.amazingmarvin.com/#t=' + taskId;
-			a.text = 'manually';
-			a.target = '_blank';
-			errorNote.appendChild(a);
-
-			new Notice(errorNote, 0);
+			this.showManualActionError(
+				this.isThrottle(error)
+					? 'Your request was throttled by Amazing Marvin. Wait before trying again, or do it '
+					: 'Error marking task as done in Amazing Marvin. You should do it ',
+				'https://app.amazingmarvin.com/#t=' + taskId,
+			);
+			throw error;
 		}
-	}
-
-
-	async fetchMarvinData(endpoint: string) {
-		const opt = this.settings;
-		let response;
-		let errorMessage = '';
-
-		const url = `http://${opt.localServerHost}:${opt.localServerPort}${endpoint}`;
-		try {
-			response = await requestUrl({
-				url: url,
-				headers: { 'X-API-Token': opt.apiKey }
-			});
-
-			if (response.status === 200) {
-				return response.json;
-			}
-
-			errorMessage = `[${response.status}] ${await response.text}`;
-		} catch (err) {
-			errorMessage = err.message;
-			console.debug('Failed while fetching from local server, will try the public server next:', err);
-		}
-
-		if (!opt.useLocalServer || errorMessage) {
-			try {
-				response = await requestUrl({
-          url: `https://serv.amazingmarvin.com${endpoint}`,
-					headers: { 'X-API-Token': opt.apiKey }
-				});
-
-				if (response.status === 200) {
-					return response.json;
-				}
-
-				errorMessage = `[${response.status}] ${await response.text}`;
-			} catch (err) {
-				if (response?.status === 429) {
-					errorMessage = 'Your request was throttled by Amazing Marvin.';
-				} else {
-					errorMessage = err.message;
-				}
-			}
-		}
-
-		throw new Error(`Error fetching data: ${errorMessage}`);
 	}
 
 
 	async sync() {
-		try {
-			const baseDirPath = normalizePath(CONSTANTS.baseDir);
-        const baseDir = this.app.vault.getAbstractFileByPath(baseDirPath);
-        if (baseDir) {
-            await this.app.vault.delete(baseDir, true);
-        }
-
-			this.categories = await this.fetchTasksAndCategories(CONSTANTS.categoriesEndpoint);
-
-			this.processCategories();
-			this.processInbox();
-		} catch (error) {
-			console.error('Error syncing Amazing Marvin data:', error);
+		const categories = await this.getCategories();
+		const baseDirPath = normalizePath(CONSTANTS.baseDir);
+		const baseDir = this.app.vault.getAbstractFileByPath(baseDirPath);
+		if (baseDir) {
+			await this.app.vault.delete(baseDir, true);
 		}
+
+		this.categories = categories;
+		await this.processCategories();
+		await this.processInbox();
 	}
 
-	async fetchTasksAndCategories(url: string): Promise<(Task | Category)[]> {
-		try {
-			const items = await this.fetchMarvinData(url) as (Task | Category)[];
-			return items.map(item => this.decorateWithDeepLink(item));
-		} catch (error) {
-			console.error('Error fetching data from:', url, error);
-			return [];
-		}
+	async getCategories(): Promise<Category[]> {
+		const result = await this.getMarvinRouter().getCategories();
+		this.reportReadState(result, "categories");
+		return result.data.map(item => this.decorateWithDeepLink(item, "category") as Category);
 	}
 
-	getScheduledTasks(date: string): Promise<(Task | Category)[]> {
-		let errorMessages = [];
-
-		try {
-			return this.fetchTasksAndCategories(`${CONSTANTS.scheduledOnDayEndpoint}?date=${date}`);
-		} catch (error) {
-			console.error(`Error fetching scheduled tasks: ${error}`);
-			errorMessages.push(`Error fetching scheduled tasks`);
-		}
-
-		if (errorMessages.length > 0) {
-			const message = `Encountered errors while fetching tasks:\n\n${errorMessages.join('\n')}\nSee console for details.`;
-			new Notice(message);
-		}
-		return Promise.resolve([]);
+	async getChildren(parentId: string): Promise<(Task | Category)[]> {
+		const result = await this.getMarvinRouter().getChildren(parentId);
+		this.reportReadState(result, `children of ${parentId}`);
+		return result.data.map(item => this.decorateWithDeepLink(item));
 	}
 
-	getDueTasks(date: string): Promise<(Task | Category)[]> {
-		let errorMessages = [];
-
-		try {
-			return this.fetchTasksAndCategories(`${CONSTANTS.dueOnDayEndpoint}?date=${date}`);
-		} catch (error) {
-			console.error(`Error fetching scheduled tasks: ${error}`);
-			errorMessages.push(`Error fetching scheduled tasks`);
-		}
-
-		if (errorMessages.length > 0) {
-			const message = `Encountered errors while fetching tasks:\n\n${errorMessages.join('\n')}\nSee console for details.`;
-			new Notice(message);
-		}
-		return Promise.resolve([]);
+	async getScheduledTasks(date: string): Promise<(Task | Category)[]> {
+		const result = await this.getMarvinRouter().getTodayItems(date);
+		this.reportReadState(result, "scheduled tasks");
+		return result.data.map(item => this.decorateWithDeepLink(item));
 	}
 
-	decorateWithDeepLink(item: Task | Category): Task | Category {
-		const isTask = !item.type || item.type === 'task';
+	async getDueTasks(date: string): Promise<(Task | Category)[]> {
+		const result = await this.getMarvinRouter().getDueItems(date);
+		this.reportReadState(result, "due tasks");
+		return result.data.map(item => this.decorateWithDeepLink(item));
+	}
+
+	decorateWithDeepLink(
+		item: MarvinItem,
+		defaultType: "task" | "category" = "task",
+	): Task | Category {
+		const type = item.type ?? defaultType;
 		return {
 			...item,
-			deepLink: `https://app.amazingmarvin.com/#${isTask ? 't' : 'p'}=${item._id}`,
-			type: isTask ? 'task' : item.type
-		};
+			deepLink: marvinDeepLink({ ...item, type }),
+			type,
+		} as Task | Category;
 	}
 
 	async processInbox() {
-		const inboxItems = await this.fetchTasksAndCategories(`${CONSTANTS.childrenEndpoint}?parentId=unassigned`);
+		const inboxItems = await this.getChildren("unassigned");
 		const content = this.formatItems(inboxItems);
 
 		// Define the path for the Inbox file
@@ -474,12 +356,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 		for (const category of this.categories) {
 			const path = this.getPathForCategory(category);
 			const content = this.createContentForCategory(category);
-
-			try {
-				await this.createOrUpdate(path, await content);
-			} catch (e) {
-				console.error(`Error creating file for ${path}:`, e);
-			}
+			await this.createOrUpdate(path, await content);
 		}
 	}
 
@@ -506,7 +383,11 @@ export default class AmazingMarvinPlugin extends Plugin {
 
 				// Recursively format sub-tasks if any
 				if ('subtasks' in item && item.subtasks && Object.keys(item.subtasks).length > 0) {
-					const subtasks = Object.values(item.subtasks);
+					const subtasks = Object.values(item.subtasks).map(subtask => ({
+						...subtask,
+						type: "task" as const,
+						deepLink: "",
+					})) as Task[];
 					taskContent += this.formatItems(subtasks, level + 1, true); // Pass true for isSubtask
 				}
 			}
@@ -564,10 +445,76 @@ export default class AmazingMarvinPlugin extends Plugin {
 			}
 		}
 		// Fetch and format tasks
-		const children = await this.fetchTasksAndCategories(`${CONSTANTS.childrenEndpoint}?parentId=${category._id}`);
+		const children = await this.getChildren(category._id);
 		content += this.formatItems(children);
 
 		return yamlFrontmatter + content;
+	}
+
+	private getMarvinRouter(): MarvinRouter {
+		const key = [
+			this.settings.apiKey,
+			this.settings.useLocalServer,
+			this.settings.localServerHost,
+			this.settings.localServerPort,
+		].join("\u0000");
+		if (this.marvinRouter && this.marvinRouterKey === key) {
+			return this.marvinRouter;
+		}
+
+		const transport = createObsidianTransport(requestUrl);
+		const publicClient = new MarvinApiClient({
+			apiToken: this.settings.apiKey,
+			baseUrl: "https://serv.amazingmarvin.com/api",
+			origin: "public",
+			transport,
+		});
+		const localClient = this.settings.useLocalServer
+			? new MarvinApiClient({
+				apiToken: this.settings.apiKey,
+				baseUrl: `http://${this.settings.localServerHost}:${this.settings.localServerPort}/api`,
+				origin: "local",
+				transport,
+			})
+			: undefined;
+
+		this.marvinRouter = new MarvinRouter({
+			publicClient,
+			...(localClient === undefined ? {} : { localClient }),
+		});
+		this.marvinRouterKey = key;
+		return this.marvinRouter;
+	}
+
+	private reportReadState<T>(result: MarvinReadResult<T>, description: string) {
+		if (result.freshness === "stale") {
+			new Notice(
+				`Amazing Marvin is unavailable. Showing stale ${description} from ${new Date(result.fetchedAt).toLocaleTimeString()}.`,
+				8000,
+			);
+			console.warn(`Using stale Amazing Marvin ${description}`, result.warnings);
+		} else if (result.warnings.length > 0) {
+			console.debug(
+				`Amazing Marvin ${description} loaded via ${result.origin} fallback`,
+				result.warnings,
+			);
+		}
+	}
+
+	private isThrottle(error: unknown): boolean {
+		return error instanceof MarvinError && error.status === 429;
+	}
+
+	private showManualActionError(message: string, href: string) {
+		const errorNote = document.createDocumentFragment();
+		errorNote.appendText(message);
+		const link = document.createElement('a');
+		link.href = href;
+		link.text = 'manually';
+		link.target = '_blank';
+		errorNote.appendChild(link);
+		errorNote.appendText('.');
+		new Notice(errorNote, 0);
 	}
 
 }

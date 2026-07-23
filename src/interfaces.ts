@@ -1,35 +1,14 @@
-export interface Category {
-	_id: string;
-	title: string;
-	type: string;
-	updatedAt: number;
-	parentId: string;
-	startDate: string;
-	endDate: string;
-	note: string;
-	isRecurring: boolean;
-	priority: string;
-	deepLink: string;
-	dueDate: string;
-	done: boolean;
-}
+import type {
+	Category as MarvinCategory,
+	Project as MarvinProject,
+	Task as MarvinTask,
+} from "@open-horizon/marvin-client";
 
-export interface Task {
-	done: boolean;
-	subtasks: Task[];
-	_id: string;
-	title: string;
-	updatedAt: number;
-	parentId: string;
-	day: string
-	firstScheduled: string;
-	startDate: string;
-	dueDate: string;
-	endDate: string;
-	note: string;
-	doneAt: number;
-	isRecurring: boolean;
-	priority: string;
-	type: string;
+export type Category = (
+	| (Omit<MarvinCategory, "type"> & { type?: "category" | "faux" })
+	| MarvinProject
+) & { deepLink: string };
+
+export type Task = MarvinTask & {
 	deepLink: string;
-}
+};
