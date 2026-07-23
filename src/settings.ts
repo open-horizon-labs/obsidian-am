@@ -16,6 +16,7 @@ export interface AmazingMarvinPluginSettings {
 	autoRefreshTodayTasks: boolean;
 	todayRefreshIntervalMinutes: number;
 	obsidianLinkFormat: ObsidianLinkFormat;
+	syncFolder: string;
 }
 
 export const DEFAULT_SETTINGS: AmazingMarvinPluginSettings = {
@@ -31,6 +32,7 @@ export const DEFAULT_SETTINGS: AmazingMarvinPluginSettings = {
 	autoRefreshTodayTasks: true,
 	todayRefreshIntervalMinutes: 5,
 	obsidianLinkFormat: "advanced-uri",
+	syncFolder: "AmazingMarvin",
 	attemptToMarkTasksAsDone: false,
 };
 
@@ -81,6 +83,21 @@ private a(href: string, text: string) {
 				.setValue(this.plugin.settings.attemptToMarkTasksAsDone)
 				.onChange(async (value) => {
 					this.plugin.settings.attemptToMarkTasksAsDone = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setHeading().setName("Category and project import");
+
+		new Setting(containerEl)
+			.setName("Managed folder")
+			.setDesc("Vault-relative folder for imported categories, projects, and Inbox. Existing category and project notes move when their Marvin ID can be identified; old empty folders are left in place.")
+			.addText(text => text
+				.setPlaceholder("AmazingMarvin")
+				.setValue(this.plugin.settings.syncFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.syncFolder = value.trim() || "AmazingMarvin";
 					await this.plugin.saveSettings();
 				})
 			);
