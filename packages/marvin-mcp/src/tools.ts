@@ -24,7 +24,9 @@ export type MarvinOperations = Pick<
 // Validate dates in the handler rather than the SDK schema path. MCP schema
 // failures are emitted as text-only protocol errors before a tool handler can
 // return the structured error envelope LLM callers rely on.
-const dateSchema = z.string().optional();
+const dateSchema = z.string()
+	.describe("Date in YYYY-MM-DD format")
+	.optional();
 
 class MarvinMcpInputError extends Error {
 	constructor(
@@ -139,7 +141,9 @@ export function createMarvinMcpServer(
 		title: "Amazing Marvin Today",
 		description: "Read tasks and projects scheduled for a date in Amazing Marvin.",
 		inputSchema: {
-			date: dateSchema.describe("Optional date; defaults to Marvin's server date"),
+			date: dateSchema.describe(
+				"Optional YYYY-MM-DD date; defaults to Marvin's server date",
+			),
 		},
 		annotations: {
 			readOnlyHint: true,
@@ -159,7 +163,9 @@ export function createMarvinMcpServer(
 		title: "Amazing Marvin Due",
 		description: "Read open tasks and projects due on or before a date.",
 		inputSchema: {
-			date: dateSchema.describe("Optional inclusive due date; defaults to Marvin's server date"),
+			date: dateSchema.describe(
+				"Optional inclusive YYYY-MM-DD date; defaults to Marvin's server date",
+			),
 		},
 		annotations: {
 			readOnlyHint: true,
