@@ -1,6 +1,6 @@
 {
   "name": "cloud-atlas-am",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Interoperability between Obsidian and Amazing Marvin",
   "private": true,
   "workspaces": [
