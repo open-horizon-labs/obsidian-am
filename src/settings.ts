@@ -3,10 +3,10 @@ import AmazingMarvinPlugin from "./main";
 
 export interface AmazingMarvinPluginSettings {
 	linkBackToObsidianText: string;
-	attemptToMarkTasksAsDone: any;
+	attemptToMarkTasksAsDone: boolean;
 	useLocalServer: boolean;
 	localServerHost: string;
-	localServerPort: any;
+	localServerPort: number | string;
 	apiKey: string;
 	showDueDate: boolean;
 	showStartDate: boolean;
@@ -202,4 +202,3 @@ private a(href: string, text: string) {
 		}
 	}
 }
-
