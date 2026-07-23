@@ -56,6 +56,20 @@ describe("MarvinApiClient", () => {
 		});
 	});
 
+	it("reads labels through the limited API without retries", async () => {
+		const transport = new QueueTransport(
+			jsonResponse(200, [{ _id: "label-1", title: "Knowledge work" }]),
+		);
+
+		await expect(client(transport).getLabels()).resolves.toEqual([
+			{ _id: "label-1", title: "Knowledge work" },
+		]);
+		expect(transport.requests).toMatchObject([{
+			method: "GET",
+			url: "https://example.test/api/labels",
+		}]);
+	});
+
 	it("does not retry a throttled request", async () => {
 		const transport = new QueueTransport({
 			status: 429,

@@ -26,6 +26,10 @@ function operations(overrides: Partial<MarvinOperations> = {}): MarvinOperations
 	return {
 		getTodayItems: async () => todayResult,
 		getDueItems: async () => ({ ...todayResult, data: [] }),
+		getLabels: async () => ({
+			...todayResult,
+			data: [{ _id: "label-1", title: "Knowledge work" }],
+		}),
 		addTask: async (input): Promise<Task> => ({
 			_id: "created-1",
 			title: input.title,
@@ -61,10 +65,15 @@ describe("Amazing Marvin MCP", () => {
 			name: "marvin_today",
 			arguments: { date: "2026-07-23" },
 		});
+		const labels = await client.callTool({
+			name: "marvin_labels",
+			arguments: {},
+		});
 
 		expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
 			"marvin_create_task",
 			"marvin_due",
+			"marvin_labels",
 			"marvin_mark_done",
 			"marvin_today",
 		]);
@@ -76,6 +85,12 @@ describe("Amazing Marvin MCP", () => {
 				id: "task-1",
 				title: "Decide",
 				deepLink: "https://app.amazingmarvin.com/#t=task-1",
+			}],
+		});
+		expect(labels.structuredContent).toMatchObject({
+			labels: [{
+				id: "label-1",
+				title: "Knowledge work",
 			}],
 		});
 	});
@@ -143,6 +158,7 @@ describe("Amazing Marvin MCP", () => {
 				title: "Prepare application",
 				day: "2026-07-23",
 				parentId: "project-1",
+				labelIds: ["label-1"],
 			},
 		});
 		const completed = await client.callTool({
@@ -171,6 +187,7 @@ describe("Amazing Marvin MCP", () => {
 					title: "Prepare application",
 					day: "2026-07-23",
 					parentId: "project-1",
+					labelIds: ["label-1"],
 				},
 			],
 			["markDone", "created-1", -240],

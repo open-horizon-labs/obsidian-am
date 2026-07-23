@@ -1,6 +1,7 @@
 import { App, Platform, PluginSettingTab, Setting } from "obsidian";
 import AmazingMarvinPlugin from "./main";
 import type { ObsidianLinkFormat } from "./marvin/obsidianLinks";
+import type { TaskMetadataFormat } from "./marvin/taskFormatting";
 
 export interface AmazingMarvinPluginSettings {
 	linkBackToObsidianText: string;
@@ -12,6 +13,12 @@ export interface AmazingMarvinPluginSettings {
 	showDueDate: boolean;
 	showStartDate: boolean;
 	showScheduledDate: boolean;
+	taskMetadataFormat: TaskMetadataFormat;
+	taskTitleFirst: boolean;
+	taskDateLinkFormat: string;
+	taskTag: string;
+	showMarvinLabelsAsTags: boolean;
+	marvinLabelTagPrefix: string;
 	todayTasksToShow: 'due' | 'scheduled' | 'both';
 	autoRefreshTodayTasks: boolean;
 	todayRefreshIntervalMinutes: number;
@@ -28,6 +35,12 @@ export const DEFAULT_SETTINGS: AmazingMarvinPluginSettings = {
 	showDueDate: true,
 	showStartDate: true,
 	showScheduledDate: true,
+	taskMetadataFormat: "dataview",
+	taskTitleFirst: false,
+	taskDateLinkFormat: "YYYY-MM-DD",
+	taskTag: "",
+	showMarvinLabelsAsTags: false,
+	marvinLabelTagPrefix: "marvin",
 	todayTasksToShow: 'both',
 	autoRefreshTodayTasks: true,
 	todayRefreshIntervalMinutes: 5,
@@ -183,6 +196,79 @@ private a(href: string, text: string) {
 
 		new Setting(containerEl)
 			.setHeading().setName("Task formatting");
+
+		new Setting(containerEl)
+			.setName("Metadata format")
+			.setDesc("Keep the existing Dataview fields, or emit a format that Obsidian Tasks can query.")
+			.addDropdown(dropdown => dropdown
+				.addOption("dataview", "Dataview (current)")
+				.addOption("tasks-dataview", "Tasks Dataview")
+				.addOption("tasks-emoji", "Tasks emoji")
+				.setValue(this.plugin.settings.taskMetadataFormat)
+				.onChange(async (value: TaskMetadataFormat) => {
+					this.plugin.settings.taskMetadataFormat = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Put task title first")
+			.setDesc("For the current Dataview format, put readable task text before dates. Tasks-compatible formats always put the title first.")
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.taskTitleFirst)
+				.onChange(async (value) => {
+					this.plugin.settings.taskTitleFirst = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Date link format")
+			.setDesc("Moment format for Dataview date links. For example, YYYY-[W]WW links each date to its weekly note while keeping the date as the alias.")
+			.addText(text => text
+				.setPlaceholder("YYYY-MM-DD")
+				.setValue(this.plugin.settings.taskDateLinkFormat)
+				.onChange(async (value) => {
+					this.plugin.settings.taskDateLinkFormat = value.trim()
+						|| "YYYY-MM-DD";
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Task query tag")
+			.setDesc("Optional tag added to every projected Marvin task, such as #task for an Obsidian Tasks global filter.")
+			.addText(text => text
+				.setPlaceholder("#task")
+				.setValue(this.plugin.settings.taskTag)
+				.onChange(async (value) => {
+					this.plugin.settings.taskTag = value.trim();
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Marvin labels as tags")
+			.setDesc("Resolve Marvin label IDs through the limited API and add their names as Obsidian tags.")
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showMarvinLabelsAsTags)
+				.onChange(async (value) => {
+					this.plugin.settings.showMarvinLabelsAsTags = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Marvin label tag prefix")
+			.setDesc("Optional tag namespace. The default turns “Knowledge work” into #marvin/Knowledge-work.")
+			.addText(text => text
+				.setPlaceholder("marvin")
+				.setValue(this.plugin.settings.marvinLabelTagPrefix)
+				.onChange(async (value) => {
+					this.plugin.settings.marvinLabelTagPrefix = value.trim();
+					await this.plugin.saveSettings();
+				})
+			);
 
 		new Setting(containerEl)
 			.setName("Show Due Date")

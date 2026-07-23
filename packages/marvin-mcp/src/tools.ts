@@ -3,6 +3,7 @@ import * as z from "zod/v4";
 import {
 	MarvinError,
 	MarvinRouteError,
+	type Label,
 	type MarvinRouter,
 	type TaskOrProject,
 	marvinDeepLink,
@@ -10,7 +11,7 @@ import {
 
 export type MarvinOperations = Pick<
 	MarvinRouter,
-	"getTodayItems" | "getDueItems" | "addTask" | "markDone"
+	"getTodayItems" | "getDueItems" | "getLabels" | "addTask" | "markDone"
 >;
 
 const dateSchema = z.string()
@@ -29,6 +30,18 @@ function itemForTool(item: TaskOrProject) {
 		...(item.dueDate === undefined ? {} : { dueDate: item.dueDate }),
 		...(item.startDate === undefined ? {} : { startDate: item.startDate }),
 		...(item.note === undefined ? {} : { note: item.note }),
+	};
+}
+
+function labelForTool(label: Label) {
+	return {
+		id: label._id,
+		title: label.title,
+		...(label.groupId === undefined ? {} : { groupId: label.groupId }),
+		...(label.color === undefined ? {} : { color: label.color }),
+		...(label.icon === undefined ? {} : { icon: label.icon }),
+		...(label.isAction === undefined ? {} : { isAction: label.isAction }),
+		...(label.isHidden === undefined ? {} : { isHidden: label.isHidden }),
 	};
 }
 
@@ -116,12 +129,34 @@ export function createMarvinMcpServer(
 		}
 	});
 
+	server.registerTool("marvin_labels", {
+		title: "Amazing Marvin Labels",
+		description: "Read stable label IDs and titles for task creation and filtering.",
+		inputSchema: {},
+		annotations: {
+			readOnlyHint: true,
+			openWorldHint: true,
+		},
+	}, async () => {
+		try {
+			const { data, ...metadata } = await operations.getLabels();
+			return success({
+				...metadata,
+				labels: data.map(labelForTool),
+			});
+		} catch (error) {
+			return failure(error);
+		}
+	});
+
 	server.registerTool("marvin_create_task", {
 		title: "Create Amazing Marvin Task",
 		description: "Create one task in Amazing Marvin with the limited API token.",
 		inputSchema: {
 			title: z.string().trim().min(1).describe("Task title; Marvin shortcuts are supported"),
 			parentId: z.string().trim().min(1).optional(),
+			labelIds: z.array(z.string().trim().min(1)).optional()
+				.describe("Stable IDs returned by marvin_labels"),
 			day: dateSchema,
 			dueDate: dateSchema,
 			note: z.string().optional(),
@@ -140,6 +175,7 @@ export function createMarvinMcpServer(
 				title: input.title,
 				timeZoneOffset: new Date().getTimezoneOffset() * -1,
 				...(input.parentId === undefined ? {} : { parentId: input.parentId }),
+				...(input.labelIds === undefined ? {} : { labelIds: input.labelIds }),
 				...(input.day === undefined ? {} : { day: input.day }),
 				...(input.dueDate === undefined ? {} : { dueDate: input.dueDate }),
 				...(input.note === undefined ? {} : { note: input.note }),
