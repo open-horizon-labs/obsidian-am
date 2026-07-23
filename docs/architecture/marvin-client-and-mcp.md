@@ -7,7 +7,7 @@ allow a later split without making separate repositories a prerequisite.
 | Layer | Owns | Does not own |
 | --- | --- | --- |
 | `packages/marvin-client` | Limited-token endpoint models; request/error contract; Node fetch transport; local-first read routing; bounded cache; throttle circuit; stable-ID deduplication; Marvin deep links; source/action state machine | Obsidian vault/UI behavior; MCP schemas; source-note storage |
-| `src/marvin` | Obsidian `requestUrl` transport adapter; source-action frontmatter adapter; bounded Today projection | HTTP/API semantics, cache policy, or fallback decisions |
+| `src/marvin` | Obsidian `requestUrl` transport adapter; source-action frontmatter adapter; bounded Today projection; non-destructive category/project projection | HTTP/API semantics, cache policy, or fallback decisions |
 | Obsidian plugin | Commands, notices, task rendering, vault/editor changes, Obsidian links | A second Marvin API client |
 | `packages/marvin-mcp` | Stdio lifecycle, four tool schemas, tool-facing result/error presentation | A second Marvin API client; Obsidian access; generic LLM orchestration |
 
@@ -43,6 +43,13 @@ The managed Today region stores its initial morning IDs in a versioned HTML
 comment. Refresh atomically replaces only that region against the latest note
 contents; new IDs render below the morning list, and content outside the
 markers is preserved.
+
+Category, project, and Inbox imports use a separate managed marker. Stable
+Marvin IDs locate notes when their generated path or configured root changes.
+Frontmatter updates are property-scoped, and the importer repairs the older
+malformed list representation before asking Obsidian to parse and rewrite it.
+Removed Marvin items are not inferred to be safe deletions, so their notes
+remain recoverable.
 
 Source/action identity is not a task title and does not belong in MCP prompt
 text. The Obsidian projection remains responsible for note mutation; the

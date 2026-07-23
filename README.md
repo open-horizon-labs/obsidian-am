@@ -26,9 +26,18 @@ The Obsidian Amazing Marvin Plugin currently supports unidirectional synchroniza
 
 ### Sync Behavior
 
-Each import updates only the Amazing Marvin-managed region in an existing note. Your frontmatter properties and prose before or after that region are preserved. The first import of an older note adopts its recognizable generated category/project or Inbox task section; future imports use explicit markers.
+Each import updates only the Amazing Marvin-managed region in an existing note.
+Custom frontmatter properties and prose before or after that region are
+preserved. The first import of an older note adopts its recognizable generated
+category/project or Inbox task section; future imports use explicit markers.
+The importer also repairs the known malformed legacy list syntax before
+writing native YAML arrays such as `labelIds`.
 
-The managed folder defaults to `AmazingMarvin` and can be changed in plugin settings. Existing imported categories, projects, and Inbox notes are moved by their Marvin ID when possible; empty folders from an earlier location are left in place.
+The managed folder defaults to `AmazingMarvin` and can be changed in plugin
+settings. Existing imported categories, projects, and Inbox notes are moved by
+their Marvin ID when possible; empty folders from an earlier location are left
+in place. Notes for Marvin items no longer returned by the API are also left in
+place rather than deleted automatically.
 
 ### Running a Sync
 
@@ -135,6 +144,7 @@ Now, when you check off a task with an Amazing Marvin Link in an Obsidian note, 
 
 - **Managed regions**: Changes inside an Amazing Marvin-managed category, project, or Inbox region are refreshed on the next import. Keep lasting notes outside the marked region.
 - **Conflicting moves**: If a destination file already exists or multiple notes claim the same Marvin item, import stops rather than overwriting either note.
+- **Recoverable stale notes**: Notes for removed or hidden Marvin items are not automatically deleted. Review and remove them manually.
 
 By following these guidelines, you can ensure your Amazing Marvin data is accurately reflected in Obsidian while being mindful of the plugin's current limitations.
 
