@@ -1,6 +1,22 @@
 # Obsidian Amazing Marvin Plugin
 
-This plugin for [Obsidian](https://obsidian.md) enables synchronization with Amazing Marvin, a comprehensive task management and planning system. It is developed and maintained by your productivity friends at [Cloud Atlas](https://www.cloud-atlas.ai/) to facilitate a seamless integration for users who utilize both platforms.
+This plugin brings Amazing Marvin tasks, categories, and projects into
+[Obsidian](https://obsidian.md) without treating the vault as disposable. It
+also includes a companion MCP server for agents that need Marvin access
+without mutating an Obsidian vault.
+
+## Use Marvin, Obsidian, and an agent together
+
+Amazing Marvin remains the task system of record. The Obsidian plugin projects
+that work into notes you can use for context and execution. The companion MCP
+lets an agent work directly with Marvin: discover a project by stable ID, read
+its work, create a task, or complete it.
+
+Use the plugin for vault-coupled work such as imports, managed daily-note
+regions, and source-note associations. Use the MCP for Marvin-only work. The
+two surfaces share the same client, local-first read behavior, cache rules, and
+error model. Run the relevant plugin refresh or import to project a task an
+agent creates through MCP into the vault.
 
 ## Amazing Marvin Plugin Overview
 
@@ -8,21 +24,31 @@ The Amazing Marvin Plugin provides a way to bring your tasks and project structu
 
 ### Key Features
 
-- **Sync Categories and Projects**: Converts Amazing Marvin categories and projects into Obsidian folders and notes, maintaining the original hierarchy.
-- **Task Integration**: Transforms tasks into markdown checklist items, with nested subtasks properly indented.
-- **Parent Links**: For easy navigation, notes for subcategories and subprojects include backlinks to their parent category or project.
-- **Wiki Links**: Sub-Categories and projects Amazing Marvin are added as wiki links.
-- **Categories and Projects are folder notes**: Categories and projects are created as folder notes, compatible with [Obsidian folder notes](https://github.com/LostPaul/obsidian-folder-notes).
-- **Task Creation**: Users can create Amazing Marvin tasks directly within Obsidian, with support for standard Marvin shorthand notations like `+` for dates or `@` for labels.
-- **Deep Linking**: Each task and category is equipped with a deep link, providing quick navigation back to Amazing Marvin.
-- **Refreshable Daily Notes**: A bounded Today region keeps scheduled and due tasks current without rerunning the full daily-note template or overwriting surrounding prose.
-- **Automation API**: Templater, in-Obsidian agents, and other plugins can use the same typed operations as the UI, including idempotent source/action task creation.
+- **Non-destructive imports**: Category, project, and Inbox notes refresh only
+  their managed region; adjacent prose and non-plugin frontmatter survive.
+- **Hierarchy and selective roots**: Import everything or selected
+  category/project roots with their descendants while keeping ancestor notes as
+  navigation-only structure.
+- **Task projection**: Render nested Marvin tasks as checklists, with deep
+  links, parent navigation, optional labels-as-tags, and Dataview or Obsidian
+  Tasks-compatible metadata.
+- **Task creation and completion**: Create a task at the cursor, defaulting to
+  the current imported category/project when applicable; optionally mark linked
+  tasks complete in Marvin when checked in Obsidian.
+- **Refreshable daily notes**: A bounded Today region keeps due and scheduled
+  tasks current without rerunning a template or overwriting the rest of a note.
+- **Agent-ready API**: Templater and other in-Obsidian automation can use a
+  typed API with idempotent source/action task creation. The companion MCP
+  shares the Marvin client for Marvin-only workflows.
 
 ## Usage Instructions
 
 ### Sync Direction
 
-The Obsidian Amazing Marvin Plugin currently supports unidirectional synchronization. It imports and updates data from Amazing Marvin into your Obsidian vault, but it does not export or sync changes made in Obsidian back to Amazing Marvin.
+Amazing Marvin remains the source of truth for imported data. The plugin does
+not sync arbitrary Obsidian edits back to Marvin. The deliberate exceptions
+are creating a Marvin task from Obsidian and, when enabled, marking a linked
+Marvin task done after its checklist item is checked.
 
 ### Sync Behavior
 
@@ -52,9 +78,15 @@ To initiate a sync:
 
 1. Open Obsidian's Command Palette with `Ctrl/Cmd + P`.
 2. Search for and select the command `Amazing Marvin Integration: Import categories and tasks`.
-3. The plugin will then proceed to update your Obsidian vault with the current structure and content from Amazing Marvin.
+3. The plugin updates its managed regions from the current Marvin structure and
+   task data.
 
 Once imported, your Obsidian vault will contain the configured managed folder. Inside, you'll find the structured notes corresponding to your categories and projects from Amazing Marvin.
+
+Before importing, use **Settings → Obsidian Amazing Marvin Plugin → Category
+and project import** to choose the managed folder, all items or selected roots,
+and whether Inbox is included. A selected root includes all descendants;
+changing the selection deliberately leaves older notes in place for review.
 
 ### Creating a Marvin Task
 
@@ -68,6 +100,10 @@ The task creation dialog is designed to mirror the task input experience in Amaz
   `amazing-marvin-actions` frontmatter property.
 - The link can use either Advanced URI (the default, for the Advanced URI
   community plugin) or Obsidian's standard URI format.
+
+When invoked from an imported category or project note, the modal and the
+selected-text shortcut default to that Marvin item. You can still choose Inbox
+or another parent in the modal.
 
 To create a task:
 
@@ -215,61 +251,91 @@ For more detailed development instructions, refer to the [sample plugin](https:/
 
 ## Companion MCP server
 
-The repository includes a local stdio MCP server for direct LLM access to
-Amazing Marvin. Marvin-only operations do not need to pass through Obsidian.
-The MCP and plugin use the same typed client, local/public routing, cache, and
-error behavior.
+The repository includes a local **stdio MCP server** for direct agent access
+to Marvin. It is the right surface for reading Marvin, discovering a parent
+ID, creating a task, or completing a task. It never edits an Obsidian vault.
+Use the plugin API above when an operation must also persist a source/action
+association or update a managed note.
 
-Build it with:
+### Build and register it
 
 ```sh
-npm install
+npm ci
 npm run build
 ```
 
-Then configure an MCP host with an absolute path to the generated server:
+The executable is:
+
+```text
+<repository>/packages/marvin-mcp/dist/server.js
+```
+
+The server requires `AMAZING_MARVIN_API_TOKEN`, Marvin's **limited API token**.
+Do not copy that token into an MCP-host configuration file. Prefer a local
+launcher that reads your existing secret at startup and then executes the
+server. For example, configure the host with the launcher rather than the
+token:
 
 ```json
 {
   "mcpServers": {
     "amazing-marvin": {
-      "command": "node",
-      "args": ["/absolute/path/to/obsidian-am/packages/marvin-mcp/dist/server.js"],
-      "env": {
-        "AMAZING_MARVIN_API_TOKEN": "your-limited-api-token",
-        "AMAZING_MARVIN_USE_LOCAL": "true"
-      }
+      "command": "/absolute/path/to/run-amazing-marvin-mcp.mjs",
+      "args": []
     }
   }
 }
 ```
 
-`AMAZING_MARVIN_USE_LOCAL` is optional and defaults to `false`. When enabled,
-reads try `http://localhost:12082/api` before the public API. Override the
-origins with `AMAZING_MARVIN_LOCAL_API_URL` and
-`AMAZING_MARVIN_PUBLIC_API_URL`.
+That launcher should set `AMAZING_MARVIN_API_TOKEN` only in the spawned
+process's environment and execute:
 
-The initial tool surface is deliberately small:
+```sh
+node /absolute/path/to/obsidian-am/packages/marvin-mcp/dist/server.js
+```
 
-- `marvin_today`
-- `marvin_due`
-- `marvin_categories`
-- `marvin_children`
-- `marvin_labels`
-- `marvin_create_task`
-- `marvin_mark_done`
+For a temporary shell-only run, export the token in that shell instead of
+persisting it in configuration. `AMAZING_MARVIN_USE_LOCAL=true` enables
+local-first reads through the Amazing Marvin desktop API. The optional
+`AMAZING_MARVIN_LOCAL_API_URL` and `AMAZING_MARVIN_PUBLIC_API_URL` override
+their endpoints.
 
-Read results identify whether data is fresh, cached, or stale. Errors retain
-the attempted local/public origins and throttling details. The server uses the
-limited API token only; it does not use Marvin's full-access CouchDB API.
-`marvin_create_task` accepts the stable label IDs returned by
-`marvin_labels`.
+### Tool workflow
 
-The MCP owns Marvin-only operations and does not edit an Obsidian vault.
-Cross-system operations that must atomically persist a source/action
-association and update a managed note region use the plugin API above. Both
-paths share the Marvin client, and the source/action state machine itself
-lives in that shared package rather than in prompt instructions.
+| Tool | Use it for |
+| --- | --- |
+| `marvin_categories` | Discover stable category/project IDs and parent hierarchy. |
+| `marvin_children` | Read direct tasks/projects under a discovered parent ID. |
+| `marvin_labels` | Discover stable label IDs before task creation. |
+| `marvin_today` / `marvin_due` | Read scheduled or due work for an optional `YYYY-MM-DD` date. |
+| `marvin_create_task` | Create a task, optionally with `parentId`, dates, labels, note, and estimate. |
+| `marvin_mark_done` | Complete a task or project by stable ID. |
+
+An agent should discover the parent with `marvin_categories` before supplying
+`parentId` to `marvin_create_task`; it should not guess an ID from a title.
+`marvin_children` then lets it inspect one branch without loading everything.
+
+Read responses include `origin`, `freshness`, `fetchedAt`, `ageMs`, and
+`warnings`. A second equivalent read may report `freshness: "cached"`. With
+local-first enabled, an unavailable or unsupported local read falls back to
+the public API; a valid local empty result does not. Writes use the public API
+and invalidate relevant cached reads.
+
+Every tool returns JSON text plus `structuredContent`. Runtime and semantic
+input errors use `isError: true` and a structured envelope such as:
+
+```json
+{
+  "error": {
+    "kind": "input",
+    "field": "date",
+    "message": "Use YYYY-MM-DD"
+  }
+}
+```
+
+The MCP uses the limited API token only. It does not use Marvin's full-access
+CouchDB database credentials.
 
 See
 [`docs/architecture/marvin-client-and-mcp.md`](docs/architecture/marvin-client-and-mcp.md)
