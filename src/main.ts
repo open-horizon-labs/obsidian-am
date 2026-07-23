@@ -834,13 +834,25 @@ export default class AmazingMarvinPlugin extends Plugin {
 		]);
 		for (const file of this.app.vault.getMarkdownFiles()) {
 			const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
-			let itemId = managedImportItemId("", frontmatter, file.path);
+			const isLegacyLocation = [...rootsToInspect].some(
+				(root) => file.path.startsWith(root),
+			);
+			let itemId = managedImportItemId(
+				"",
+				frontmatter,
+				file.path,
+			);
 			if (
 				!itemId
-				&& [...rootsToInspect].some((root) => file.path.startsWith(root))
+				&& isLegacyLocation
 			) {
 				const content = await this.app.vault.cachedRead(file);
-				itemId = managedImportItemId(content, frontmatter, file.path);
+				itemId = managedImportItemId(
+					content,
+					frontmatter,
+					file.path,
+					true,
+				);
 			}
 			if (!itemId) {
 				continue;
