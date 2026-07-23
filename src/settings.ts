@@ -39,6 +39,11 @@ export interface AmazingMarvinPluginSettings {
 	syncSelectionMode: SyncSelectionMode;
 	syncRoots: SyncRootSelection[];
 	syncInbox: boolean;
+	incrementalSyncEnabled: boolean;
+	databaseUri: string;
+	databaseUser: string;
+	databasePassword: string;
+	incrementalSyncIntervalMinutes: number;
 }
 
 export const DEFAULT_SETTINGS: AmazingMarvinPluginSettings = {
@@ -64,6 +69,11 @@ export const DEFAULT_SETTINGS: AmazingMarvinPluginSettings = {
 	syncSelectionMode: "all",
 	syncRoots: [],
 	syncInbox: true,
+	incrementalSyncEnabled: false,
+	databaseUri: "",
+	databaseUser: "",
+	databasePassword: "",
+	incrementalSyncIntervalMinutes: 1,
 	attemptToMarkTasksAsDone: false,
 };
 
@@ -265,6 +275,96 @@ private a(href: string, text: string) {
 					await this.plugin.saveSettings();
 				})
 			);
+
+		new Setting(containerEl)
+			.setHeading().setName("Experimental incremental import");
+
+		new Setting(containerEl)
+			.setName("Use persistent incremental cache")
+			.setDesc("Opt in to a local cache and CouchDB changes feed. This requires separate full-database credentials; the limited API token remains the default and fallback.")
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.incrementalSyncEnabled)
+				.onChange(async (value) => {
+					this.plugin.settings.incrementalSyncEnabled = value;
+					await this.plugin.saveSettings();
+					this.display();
+				})
+			);
+
+		if (this.plugin.settings.incrementalSyncEnabled) {
+			new Setting(containerEl)
+				.setName("Database URI")
+				.setDesc("Full HTTPS database URI from Marvin's API settings. Credentials embedded in the URI are rejected.")
+				.addText(text => text
+					.setPlaceholder("https://.../database")
+					.setValue(this.plugin.settings.databaseUri)
+					.onChange(async (value) => {
+						this.plugin.settings.databaseUri = value.trim();
+						await this.plugin.saveSettings();
+					})
+				);
+
+			new Setting(containerEl)
+				.setName("Database user")
+				.addText(text => text
+					.setValue(this.plugin.settings.databaseUser)
+					.onChange(async (value) => {
+						this.plugin.settings.databaseUser = value.trim();
+						await this.plugin.saveSettings();
+					})
+				);
+
+			new Setting(containerEl)
+				.setName("Database password")
+				.setDesc("Stored locally in this plugin's Obsidian settings and never exposed through MCP.")
+				.addText(text => {
+					text.inputEl.type = "password";
+					text
+						.setValue(this.plugin.settings.databasePassword)
+						.onChange(async (value) => {
+							this.plugin.settings.databasePassword = value;
+							await this.plugin.saveSettings();
+						});
+				});
+
+			new Setting(containerEl)
+				.setName("Catch-up interval")
+				.setDesc("Minutes between long-poll catch-ups while Obsidian is active.")
+				.addText(text => text
+					.setPlaceholder("1")
+					.setValue(
+						this.plugin.settings.incrementalSyncIntervalMinutes.toString(),
+					)
+					.onChange(async (value) => {
+						const parsed = Number.parseInt(value, 10);
+						if (Number.isFinite(parsed) && parsed > 0) {
+							this.plugin.settings.incrementalSyncIntervalMinutes = parsed;
+							await this.plugin.saveSettings();
+						}
+					})
+				);
+
+			const status = this.plugin.getIncrementalSyncStatus();
+			new Setting(containerEl)
+				.setName("Incremental status")
+				.setDesc(
+					status.error
+						? `Recoverable error: ${status.error}`
+						: status.lastSuccessfulSyncAt
+							? `Last successful catch-up: ${new Date(
+								status.lastSuccessfulSyncAt,
+							).toLocaleString()}`
+							: "Not hydrated yet. Run Import categories and tasks.",
+				)
+				.addButton(button => button
+					.setButtonText("Reset cache")
+					.setWarning()
+					.onClick(async () => {
+						await this.plugin.clearIncrementalCache();
+						this.display();
+					})
+				);
+		}
 
 		new Setting(containerEl)
 			.setHeading().setName("Today Tasks");

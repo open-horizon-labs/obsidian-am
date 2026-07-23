@@ -72,6 +72,17 @@ import {
 	type TodayProjectionItem,
 } from "./marvin/todayProjection";
 import { runTodayProjection } from "./marvin/todayWorkflow";
+import { CouchChangesClient } from "./marvin/couchChanges";
+import {
+	IncrementalMarvinCache,
+	IncrementalRetryBackoff,
+	type CachedMarvinItem,
+	type IncrementalUpdate,
+} from "./marvin/incrementalCache";
+import {
+	ObsidianIncrementalCacheStore,
+	createObsidianCouchTransport,
+} from "./marvin/obsidianIncremental";
 import {
 	categoryProjectionItems,
 	planCategorySync,
@@ -118,6 +129,15 @@ export default class AmazingMarvinPlugin extends Plugin {
 	private sourceActionService?: SourceActionService;
 	private sourceActionRouter?: MarvinRouter;
 	private marvinLabelsById = new Map<string, Label>();
+	private incrementalCache?: IncrementalMarvinCache;
+	private incrementalCacheKey = "";
+	private incrementalBackoff = new IncrementalRetryBackoff();
+	private incrementalRun?: Promise<void>;
+	private incrementalGeneration = 0;
+	private lastAutomaticIncrementalAt = 0;
+	private lastIncrementalError = "";
+	private lastIncrementalSyncAt = 0;
+	private categoryProjectionTail: Promise<void> = Promise.resolve();
 	private readonly todayRefreshes = new Map<string, Promise<RefreshTodayTasksResult>>();
 	private lastAutomaticRefreshAt = 0;
 	private lastAutomaticRefreshError = "";
@@ -132,6 +152,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 		createTask: async (task) => {
 			const created = await this.getMarvinRouter().addTask(task);
 			this.queueManagedTodayRefresh("creating a task");
+			this.queueIncrementalCatchUp("creating a task");
 			return created;
 		},
 		ensureTaskForSource: (input) => this.ensureTaskForSource(input),
@@ -143,6 +164,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 				...(input.title === undefined ? {} : { title: input.title }),
 			});
 			this.queueManagedTodayRefresh("resolving a contextual task");
+			this.queueIncrementalCatchUp("resolving a contextual task");
 			return result;
 		},
 		clearPendingSourceAction: (input) => (
@@ -278,12 +300,15 @@ export default class AmazingMarvinPlugin extends Plugin {
 
 		this.registerDomEvent(window, "focus", () => {
 			void this.runAutomaticTodayRefresh("window focus");
+			void this.runAutomaticIncrementalSync("window focus");
 		});
 		this.registerInterval(window.setInterval(() => {
 			void this.runAutomaticTodayRefresh("interval");
+			void this.runAutomaticIncrementalSync("interval");
 		}, 60_000));
 		this.app.workspace.onLayoutReady(() => {
 			void this.runAutomaticTodayRefresh("startup");
+			void this.runAutomaticIncrementalSync("startup");
 		});
 	}
 	async addMarvinTask(catId: string, taskTitle: string, notePath: string = '', vaultName: string = ''): Promise<Task> {
@@ -323,6 +348,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 			}
 			new Notice("Task added in Amazing Marvin.");
 			this.queueManagedTodayRefresh("creating a task");
+			this.queueIncrementalCatchUp("creating a task");
 			return this.decorateWithDeepLink(task) as Task;
 		} catch (error) {
 			console.error('Error creating task:', error);
@@ -349,7 +375,9 @@ export default class AmazingMarvinPlugin extends Plugin {
 		);
 	}
 
-	onunload() { }
+	onunload() {
+		this.incrementalGeneration += 1;
+	}
 
 	async loadSettings() {
 		const stored = await this.loadData() as Partial<AmazingMarvinPluginSettings> | null;
@@ -360,11 +388,49 @@ export default class AmazingMarvinPlugin extends Plugin {
 	}
 
 	async saveSettings() {
-		this.marvinRouter = undefined;
-		this.marvinRouterKey = "";
-		this.sourceActionService = undefined;
-		this.sourceActionRouter = undefined;
+		const nextIncrementalKey = this.incrementalConfigurationKey();
+		if (
+			this.incrementalCache
+			&& this.incrementalCacheKey !== nextIncrementalKey
+		) {
+			this.incrementalGeneration += 1;
+			this.incrementalCache = undefined;
+			this.incrementalCacheKey = "";
+			this.incrementalBackoff = new IncrementalRetryBackoff();
+			this.lastIncrementalError = "";
+		}
 		await this.saveData(this.settings);
+	}
+
+	getIncrementalSyncStatus(): {
+		lastSuccessfulSyncAt?: number;
+		error?: string;
+	} {
+		const cached = this.incrementalCache?.getStatus();
+		const lastSuccessfulSyncAt = Math.max(
+			this.lastIncrementalSyncAt,
+			cached?.lastSuccessfulSyncAt ?? 0,
+		);
+		return {
+			...(lastSuccessfulSyncAt > 0 ? { lastSuccessfulSyncAt } : {}),
+			...(this.lastIncrementalError
+				? { error: this.lastIncrementalError }
+				: {}),
+		};
+	}
+
+	async clearIncrementalCache(): Promise<void> {
+		this.incrementalGeneration += 1;
+		if (this.incrementalCache) {
+			await this.incrementalCache.clear();
+		} else {
+			await this.createIncrementalCacheStore().clear();
+		}
+		this.incrementalCache = undefined;
+		this.incrementalCacheKey = "";
+		this.incrementalBackoff = new IncrementalRetryBackoff();
+		this.lastIncrementalError = "";
+		this.lastIncrementalSyncAt = 0;
 	}
 
 	async markDone(taskId: string) {
@@ -382,6 +448,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 			note.appendText(' marked as done in Amazing Marvin.');
 			new Notice(note, 5000);
 			this.queueManagedTodayRefresh("completing a task");
+			this.queueIncrementalCatchUp("completing a task");
 			return result;
 		} catch (error) {
 			console.error('Error marking task as done:', error);
@@ -420,6 +487,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 			task: request,
 		});
 		this.queueManagedTodayRefresh("creating a contextual task");
+		this.queueIncrementalCatchUp("creating a contextual task");
 		return result;
 	}
 
@@ -594,30 +662,160 @@ export default class AmazingMarvinPlugin extends Plugin {
 		});
 	}
 
+	private queueIncrementalCatchUp(context: string): void {
+		if (!this.settings.incrementalSyncEnabled) {
+			return;
+		}
+		void this.runAutomaticIncrementalSync(`write: ${context}`);
+	}
+
 
 	async sync() {
+		if (this.settings.incrementalSyncEnabled) {
+			try {
+				const cache = this.getIncrementalCache();
+				const update = await cache.sync("normal");
+				await this.projectIncrementalUpdate(
+					{ ...update, fullRefresh: true },
+					cache,
+				);
+				await cache.acknowledgeProjection();
+				this.recordIncrementalSuccess(update.lastSuccessfulSyncAt);
+				return;
+			} catch (error) {
+				this.recordIncrementalFailure(error);
+				console.warn(
+					"Incremental Amazing Marvin import failed; using REST fallback:",
+					error,
+				);
+				new Notice(
+					`Incremental Amazing Marvin import failed; using the REST fallback. ${this.errorMessage(error)}`,
+					10_000,
+				);
+			}
+		}
+		await this.syncFromRest();
+	}
+
+	private async syncFromRest(): Promise<void> {
 		await this.refreshLabelsForProjection();
-		const categories = await this.getCategories();
+		const categories = await this.readRestCategories();
+		await this.projectCategoryImport(
+			categories,
+			(parentId) => this.readRestChildren(parentId),
+		);
+	}
+
+	private async projectIncrementalUpdate(
+		update: IncrementalUpdate,
+		cache = this.getIncrementalCache(),
+	): Promise<void> {
+		const cachedCategories = cache.getCategories();
+		if (!cachedCategories) {
+			throw new Error("Incremental Amazing Marvin cache is not hydrated");
+		}
+		const categories = cachedCategories.map(
+			(item) => this.decorateWithDeepLink(item, "category") as Category,
+		);
+		await this.refreshLabelsForProjection();
+		await this.projectCategoryImport(
+			categories,
+			async (parentId) => {
+				const children = cache.getChildren(parentId);
+				if (!children) {
+					throw new Error(
+						`Incremental Amazing Marvin cache has no children for ${parentId}`,
+					);
+				}
+				return children.map(
+					(item) => this.decorateWithDeepLink(item) as Task | Category,
+				);
+			},
+			update.fullRefresh
+				? undefined
+				: new Set(update.affectedContainerIds),
+			update.fullRefresh || update.inboxChanged,
+		);
+	}
+
+	private async projectCategoryImport(
+		categories: Category[],
+		readChildren: (parentId: string) => Promise<(Task | Category)[]>,
+		targetIds?: ReadonlySet<string>,
+		updateInbox = true,
+	): Promise<void> {
+		const pending = this.categoryProjectionTail
+			.catch(() => undefined)
+			.then(() => this.projectCategoryImportOnce(
+				categories,
+				readChildren,
+				targetIds,
+				updateInbox,
+			));
+		this.categoryProjectionTail = pending;
+		return pending;
+	}
+
+	private async projectCategoryImportOnce(
+		categories: Category[],
+		readChildren: (parentId: string) => Promise<(Task | Category)[]>,
+		targetIds?: ReadonlySet<string>,
+		updateInbox = true,
+	): Promise<void> {
 		this.categories = categories;
 		const plan = planCategorySync(
 			categories,
 			this.settings.syncSelectionMode,
 			this.settings.syncRoots.map((root) => root.id),
 		);
+		if (targetIds && targetIds.size === 0 && !updateInbox) {
+			return;
+		}
 		const existingFiles = await this.findManagedImportFiles();
-		await this.processCategories(existingFiles, plan);
-		if (this.settings.syncInbox) {
-			await this.processInbox(existingFiles);
+		await this.processCategories(
+			existingFiles,
+			plan,
+			readChildren,
+			targetIds,
+		);
+		if (this.settings.syncInbox && updateInbox) {
+			await this.processInbox(existingFiles, readChildren);
 		}
 	}
 
 	async getCategories(): Promise<Category[]> {
+		const cached = this.settings.incrementalSyncEnabled
+			? this.incrementalCache?.getCategories()
+			: undefined;
+		if (cached) {
+			return cached.map(
+				(item) => this.decorateWithDeepLink(item, "category") as Category,
+			);
+		}
+		return this.readRestCategories();
+	}
+
+	private async readRestCategories(): Promise<Category[]> {
 		const result = await this.getMarvinRouter().getCategories();
 		this.reportReadState(result, "categories");
 		return result.data.map(item => this.decorateWithDeepLink(item, "category") as Category);
 	}
 
 	async getChildren(parentId: string): Promise<(Task | Category)[]> {
+		const cached = this.settings.incrementalSyncEnabled
+			? this.incrementalCache?.getChildren(parentId)
+			: undefined;
+		if (cached) {
+			return cached.map(
+				(item) => this.decorateWithDeepLink(item) as Task | Category,
+			);
+		}
+		return this.readRestChildren(parentId);
+	}
+
+	private async readRestChildren(
+		parentId: string,
+	): Promise<(Task | Category)[]> {
 		const result = await this.getMarvinRouter().getChildren(parentId);
 		this.reportReadState(result, `children of ${parentId}`);
 		return result.data.map(item => this.decorateWithDeepLink(item));
@@ -647,8 +845,11 @@ export default class AmazingMarvinPlugin extends Plugin {
 		} as Task | Category;
 	}
 
-	async processInbox(existingFiles: Map<string, TFile>) {
-		const inboxItems = await this.getChildren("unassigned");
+	async processInbox(
+		existingFiles: Map<string, TFile>,
+		readChildren: (parentId: string) => Promise<(Task | Category)[]>,
+	) {
+		const inboxItems = await readChildren("unassigned");
 		const content = this.formatItems(inboxItems);
 		const inboxFilePath = normalizePath(`${this.getSyncBaseDir()}/Inbox.md`);
 		await this.moveManagedFile(existingFiles.get("unassigned"), inboxFilePath);
@@ -717,15 +918,21 @@ export default class AmazingMarvinPlugin extends Plugin {
 	async processCategories(
 		existingFiles: Map<string, TFile>,
 		plan: CategorySyncPlan,
+		readChildren: (parentId: string) => Promise<(Task | Category)[]>,
+		targetIds?: ReadonlySet<string>,
 	) {
 		for (const category of this.categories.filter(
-			(item) => plan.includedIds.has(item._id),
+			(item) => (
+				plan.includedIds.has(item._id)
+				&& (!targetIds || targetIds.has(item._id))
+			),
 		)) {
 			const path = this.getPathForCategory(category);
 			await this.moveManagedFile(existingFiles.get(category._id), path);
 			const content = await this.createContentForCategory(
 				category,
 				plan,
+				readChildren,
 			);
 			await this.createOrUpdateManaged(
 				path,
@@ -835,6 +1042,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 	async createContentForCategory(
 		category: Category,
 		plan: CategorySyncPlan,
+		readChildren: (parentId: string) => Promise<(Task | Category)[]>,
 	): Promise<string> {
 		const labelTags = this.settings.showMarvinLabelsAsTags
 			? formatMarvinLabelTags(
@@ -857,7 +1065,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 		}
 		// Fetch and format tasks
 		const fetchedChildren = plan.contentIds.has(category._id)
-			? await this.getChildren(category._id)
+			? await readChildren(category._id)
 			: undefined;
 		const children = categoryProjectionItems(
 			category._id,
@@ -989,6 +1197,140 @@ export default class AmazingMarvinPlugin extends Plugin {
 		);
 	}
 
+	private async runAutomaticIncrementalSync(
+		reason: string,
+	): Promise<void> {
+		if (
+			!this.settings.incrementalSyncEnabled
+			|| !this.settings.databaseUri
+			|| !this.settings.databaseUser
+			|| !this.settings.databasePassword
+			|| !this.incrementalBackoff.canRun()
+		) {
+			return;
+		}
+		if (this.incrementalRun) {
+			return this.incrementalRun;
+		}
+		const now = Date.now();
+		const minimumDelay = reason.startsWith("write:")
+			? 0
+			: reason === "interval"
+			? Math.max(1, this.settings.incrementalSyncIntervalMinutes) * 60_000
+			: 15_000;
+		if (now - this.lastAutomaticIncrementalAt < minimumDelay) {
+			return;
+		}
+		this.lastAutomaticIncrementalAt = now;
+		const generation = this.incrementalGeneration;
+		const pending = (async () => {
+			try {
+				const cache = this.getIncrementalCache();
+				const update = await cache.sync("longpoll");
+				if (
+					generation !== this.incrementalGeneration
+					|| !this.settings.incrementalSyncEnabled
+				) {
+					return;
+				}
+				if (update.changed || update.fullRefresh) {
+					await this.projectIncrementalUpdate(update, cache);
+					await cache.acknowledgeProjection();
+				}
+				this.recordIncrementalSuccess(update.lastSuccessfulSyncAt);
+			} catch (error) {
+				const previous = this.lastIncrementalError;
+				const delay = this.recordIncrementalFailure(error);
+				console.warn(
+					`Amazing Marvin incremental sync failed after ${reason}; retrying after ${delay}ms:`,
+					error,
+				);
+				if (this.lastIncrementalError !== previous) {
+					new Notice(
+						`Amazing Marvin incremental sync paused after a recoverable error. Existing notes were left unchanged. ${this.lastIncrementalError}`,
+						10_000,
+					);
+				}
+			}
+		})().finally(() => {
+			this.incrementalRun = undefined;
+		});
+		this.incrementalRun = pending;
+		return pending;
+	}
+
+	private recordIncrementalSuccess(at: number): void {
+		this.incrementalBackoff.recordSuccess();
+		this.lastIncrementalSyncAt = at;
+		this.lastIncrementalError = "";
+	}
+
+	private recordIncrementalFailure(error: unknown): number {
+		this.lastIncrementalError = this.errorMessage(error);
+		return this.incrementalBackoff.recordFailure();
+	}
+
+	private getIncrementalCache(): IncrementalMarvinCache {
+		const key = this.incrementalConfigurationKey();
+		if (this.incrementalCache && this.incrementalCacheKey === key) {
+			return this.incrementalCache;
+		}
+		// Hydration must not reuse a REST response fetched before the CouchDB
+		// checkpoint. This router is intentionally private to the one-time snapshot.
+		const hydrationRouter = this.createMarvinRouter();
+		const client = new CouchChangesClient({
+			databaseUri: this.settings.databaseUri,
+			databaseUser: this.settings.databaseUser,
+			databasePassword: this.settings.databasePassword,
+		}, createObsidianCouchTransport(requestUrl));
+		const sourceKey = [
+			this.settings.databaseUri.trim(),
+			this.settings.databaseUser.trim(),
+		].join("\u0000");
+		this.incrementalCache = new IncrementalMarvinCache({
+			sourceKey,
+			changes: client,
+			store: this.createIncrementalCacheStore(),
+			snapshot: {
+				getCategories: async () => {
+					// A failed partial hydration can be retried on this cache instance.
+					// Clear those post-checkpoint reads before taking the new snapshot.
+					hydrationRouter.clearCache();
+					const result = await hydrationRouter.getCategories();
+					this.reportReadState(result, "categories for cache hydration");
+					return result.data;
+				},
+				getChildren: async (parentId) => {
+					const result = await hydrationRouter.getChildren(parentId);
+					this.reportReadState(
+						result,
+						`children of ${parentId} for cache hydration`,
+					);
+					return result.data as CachedMarvinItem[];
+				},
+			},
+		});
+		this.incrementalCacheKey = key;
+		return this.incrementalCache;
+	}
+
+	private createIncrementalCacheStore(): ObsidianIncrementalCacheStore {
+		return new ObsidianIncrementalCacheStore(
+			this.app.vault.adapter,
+			this.manifest.dir
+				?? `.obsidian/plugins/${this.manifest.id}`,
+		);
+	}
+
+	private incrementalConfigurationKey(): string {
+		return [
+			this.settings.incrementalSyncEnabled,
+			this.settings.databaseUri,
+			this.settings.databaseUser,
+			this.settings.databasePassword,
+		].join("\u0000");
+	}
+
 	private getMarvinRouter(): MarvinRouter {
 		const key = [
 			this.settings.apiKey,
@@ -1000,6 +1342,12 @@ export default class AmazingMarvinPlugin extends Plugin {
 			return this.marvinRouter;
 		}
 
+		this.marvinRouter = this.createMarvinRouter();
+		this.marvinRouterKey = key;
+		return this.marvinRouter;
+	}
+
+	private createMarvinRouter(): MarvinRouter {
 		const transport = createObsidianTransport(requestUrl);
 		const publicClient = new MarvinApiClient({
 			apiToken: this.settings.apiKey,
@@ -1016,12 +1364,10 @@ export default class AmazingMarvinPlugin extends Plugin {
 			})
 			: undefined;
 
-		this.marvinRouter = new MarvinRouter({
+		return new MarvinRouter({
 			publicClient,
 			...(localClient === undefined ? {} : { localClient }),
 		});
-		this.marvinRouterKey = key;
-		return this.marvinRouter;
 	}
 
 	private getSourceActionStore(): ObsidianSourceActionStore {
