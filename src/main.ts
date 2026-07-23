@@ -61,6 +61,7 @@ import {
 	categoryNotePath,
 	normalizeManagedFolder,
 } from "./marvin/categoryPaths";
+import { marvinParentIdFromFrontmatter } from "./marvin/noteContext";
 import {
 	ObsidianSourceActionStore,
 } from "./marvin/obsidianSourceActions";
@@ -180,10 +181,11 @@ export default class AmazingMarvinPlugin extends Plugin {
 			editorCallback: async (editor, view) => {
         // Fetch categories first and make sure they are loaded
         try {
+			const defaultParentId = this.marvinParentIdForFile(view.file);
           // If a region of text is selected, at least 3 characters long, use that to add a new task and skip the modal
           if (editor.somethingSelected() && editor.getSelection().length > 2) {
             try {
-              const task = await this.addMarvinTask('', editor.getSelection(), view.file?.path, this.app.vault.getName());
+              const task = await this.addMarvinTask(defaultParentId ?? '', editor.getSelection(), view.file?.path, this.app.vault.getName());
               editor.replaceSelection(`- [${task.done ? 'x' : ' '}] [⚓](${task.deepLink}) ${this.formatTaskDetails(task as Task, '')} ${task.title}`);
             } catch (error) {
               console.error('Could not create Marvin task:', error);
@@ -199,7 +201,7 @@ export default class AmazingMarvinPlugin extends Plugin {
             } catch (error) {
               console.error('Could not create Marvin task:', error);
             }
-          }).open();
+          }, defaultParentId).open();
         } catch (error) {
           console.error('Error fetching categories:', error);
           new Notice('Failed to load categories from Amazing Marvin.');
@@ -313,6 +315,15 @@ export default class AmazingMarvinPlugin extends Plugin {
 			);
 			throw error;
 		}
+	}
+
+	private marvinParentIdForFile(file: TFile | null): string | undefined {
+		if (!file) {
+			return undefined;
+		}
+		return marvinParentIdFromFrontmatter(
+			this.app.metadataCache.getFileCache(file)?.frontmatter,
+		);
 	}
 
 	onunload() { }

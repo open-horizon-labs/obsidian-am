@@ -69,13 +69,18 @@ export class AddTaskModal extends Modal {
   onSubmit: (result: { catId: string, task: string }) => void;
   categories: Category[];
 
-  constructor(app: App, categories: Category[], onSubmit: (result: { catId: string; task: string; }) => void) {
+  constructor(
+    app: App,
+    categories: Category[],
+    onSubmit: (result: { catId: string; task: string; }) => void,
+    defaultCategoryId = inboxCategory._id,
+  ) {
     super(app);
     this.onSubmit = onSubmit;
     this.categories = categories.sort((a, b) => {
       return this.getFullPathToCategoryTitle(a, categories).localeCompare(this.getFullPathToCategoryTitle(b, categories));
     });
-    this.result = { catId: inboxCategory._id, task: '' };
+    this.result = { catId: defaultCategoryId, task: '' };
   }
 
   onOpen() {
@@ -88,8 +93,11 @@ export class AddTaskModal extends Modal {
       .setName("Category")
       .addText(text => {
         categoryInput = text.inputEl;
-        text.setValue(inboxCategory.title);
-        this.result.catId = inboxCategory._id;
+        const selectedCategory = this.categories.find(
+          category => category._id === this.result.catId,
+        ) ?? inboxCategory;
+        text.setValue(selectedCategory.title);
+        this.result.catId = selectedCategory._id;
         text.onChange(value => {
           const suggester = new CategorySuggesterModal(this.app, this.categories, (item: Category) => {
             categoryInput.value = item.title;
