@@ -23,7 +23,9 @@ export function amTaskWatcher(_app: App, plugin: AmazingMarvinPlugin) {
           let line = update.state.doc.lineAt(fromA).text;
           const match = line.match(COMPLETED_AM_TASK);
           if (match && match[1]) {
-            plugin.markDone(match[1]);
+            void plugin.markDone(match[1]).catch((error) => {
+              console.error("Could not mark Amazing Marvin task as done:", error);
+            });
           }
         });
       }

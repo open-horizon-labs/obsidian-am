@@ -1,0 +1,30 @@
+{
+  "name": "@open-horizon/marvin-client",
+  "version": "0.1.0",
+  "description": "Shared Amazing Marvin limited-token client for Obsidian and MCP adapters",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE.upstream",
+    "UPSTREAM.md"
+  ],
+  "scripts": {
+    "build": "npm run clean && esbuild src/index.ts --bundle --platform=node --target=node18 --format=esm --outfile=dist/index.js && esbuild src/index.ts --bundle --platform=node --target=node18 --format=cjs --outfile=dist/index.cjs && tsc --project tsconfig.json --emitDeclarationOnly",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "typecheck": "tsc --project tsconfig.test.json --noEmit"
+  },
+  "sideEffects": false,
+  "license": "MIT"
+}

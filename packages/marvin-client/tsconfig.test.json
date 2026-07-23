@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "types": [
+      "node",
+      "vitest"
+    ]
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": []
+}
