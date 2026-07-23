@@ -26,14 +26,12 @@
     "obsidian-daily-notes-interface": "^0.9.4"
   },
   "devDependencies": {
-    "@types/node": "^20.9.4",
-    "@typescript-eslint/eslint-plugin": "^6.12.0",
-    "@typescript-eslint/parser": "^6.12.0",
-    "builtin-modules": "^3.3.0",
-    "esbuild": "^0.19.7",
+    "@codemirror/view": "^6.43.6",
+    "@types/node": "^20.19.43",
+    "esbuild": "^0.28.1",
     "obsidian": "^1.4.11",
     "tslib": "^2.6.2",
     "typescript": "^5.3.2",
-    "vitest": "^1.6.1"
+    "vitest": "^4.1.10"
   }
 }

@@ -76,3 +76,9 @@ Its provenance and MIT license are retained in
 
 Only Amazing Marvin's limited `X-API-Token` endpoints are in scope. Full-access
 CouchDB operations are intentionally absent.
+
+The MCP starts only a stdio transport; it does not construct a Hono HTTP
+server, serve static files, or expose a network listener. Dependency audits may
+still report the SDK's transitive Hono adapter. Treat that report as an
+upstream-monitoring item rather than evidence of an exposed plugin route, and
+reassess it whenever the MCP SDK changes.

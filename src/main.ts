@@ -1,5 +1,6 @@
 import {
 	Notice,
+	type Editor,
 	Plugin,
 	TFile,
 	TFolder,
@@ -105,7 +106,7 @@ const animateNotice = (notice: Notice) => {
 		message = message.replace(" ...", "    ");
 	}
 	notice.setMessage(message);
-	setTimeout(() => animateNotice(notice), 500);
+	activeWindow.setTimeout(() => animateNotice(notice), 500);
 };
 
 export default class AmazingMarvinPlugin extends Plugin {
@@ -170,7 +171,14 @@ export default class AmazingMarvinPlugin extends Plugin {
 		}
 	};
 
-	async onload() {
+	onload(): void {
+		void this.initialize().catch((error) => {
+			console.error("Could not initialize Amazing Marvin Integration:", error);
+			new Notice("Could not initialize Amazing Marvin Integration.");
+		});
+	}
+
+	private async initialize(): Promise<void> {
 		await this.loadSettings();
 		this.addSettingTab(new AmazingMarvinSettingsTab(this.app, this));
 		if (this.settings.attemptToMarkTasksAsDone) {
@@ -195,97 +203,130 @@ export default class AmazingMarvinPlugin extends Plugin {
 		this.addCommand({
 			id: "create-task",
 			name: "Create task",
-			editorCallback: async (editor, view) => {
-        // Fetch categories first and make sure they are loaded
-        try {
-			const defaultParentId = this.marvinParentIdForFile(view.file);
-			await this.refreshLabelsForProjection();
-          // If a region of text is selected, at least 3 characters long, use that to add a new task and skip the modal
-          if (editor.somethingSelected() && editor.getSelection().length > 2) {
-            try {
-              const task = await this.addMarvinTask(defaultParentId ?? '', editor.getSelection(), view.file?.path, this.app.vault.getName());
-              editor.replaceSelection(
-				`- [${task.done ? 'x' : ' '}] ${this.renderTaskBody(task)}`,
-			  );
-            } catch (error) {
-              console.error('Could not create Marvin task:', error);
-            }
-            return;
-          }
-
-          const categories = await this.getCategories();
-          new AddTaskModal(this.app, categories, async (taskDetails: { catId: string, task: string }) => {
-            try {
-              const task = await this.addMarvinTask(taskDetails.catId, taskDetails.task, view.file?.path, this.app.vault.getName());
-              editor.replaceRange(
-				`- [${task.done ? 'x' : ' '}] ${this.renderTaskBody(task)}`,
-				editor.getCursor(),
-			  );
-            } catch (error) {
-              console.error('Could not create Marvin task:', error);
-            }
-          }, defaultParentId).open();
-        } catch (error) {
-          console.error('Error fetching categories:', error);
-          new Notice('Failed to load categories from Amazing Marvin.');
-        }
+			editorCallback: (editor, view) => {
+				void this.createTaskFromEditor(editor, view);
       }});
 
       this.addCommand({
         id: 'import',
         name: 'Import categories and tasks',
-        callback: async () => {
-          const notice = new Notice('Importing from Amazing Marvin...');
-          animateNotice(notice);
-          try {
-            await this.sync();
-            notice.hide(); // Hide the animating notice before showing success message
-            new Notice('Amazing Marvin data imported successfully.');
-          } catch (error) {
-            console.error('Sync error:', error);
-            new Notice('Error syncing with Amazing Marvin.');
-          }
+		callback: () => {
+			void this.importFromMarvin();
         }
       });
 		this.addCommand({
 			id: "import-today",
 			name: "Refresh today's tasks",
-			editorCallback: async (_editor, view) => {
-				try {
-					if (!view.file) {
-						throw new Error("Open the daily note you want to refresh");
-					}
-					const fileDate = getDateFromFile(view.file, "day");
-					if (!fileDate) {
-						throw new Error(`${view.file.path} is not recognized as a daily note`);
-					}
-					const date = fileDate.format("YYYY-MM-DD");
-					const result = await this.refreshTodayTasks({
-						date,
-						filePath: view.file.path,
-					});
-					new Notice(
-						result.changed
-							? `Refreshed Amazing Marvin tasks for ${date}.`
-							: `Amazing Marvin tasks for ${date} are already current.`,
-					);
-				} catch (error) {
-					new Notice(`Error refreshing today's tasks: ${this.errorMessage(error)}`);
-					console.error("Error refreshing today's tasks:", error);
-				}
+			editorCallback: (_editor, view) => {
+				void this.refreshTodayFromEditor(view);
 			}
 		});
 
-		this.registerDomEvent(window, "focus", () => {
+		this.registerDomEvent(activeWindow, "focus", () => {
 			void this.runAutomaticTodayRefresh("window focus");
 		});
-		this.registerInterval(window.setInterval(() => {
+		this.registerInterval(activeWindow.setInterval(() => {
 			void this.runAutomaticTodayRefresh("interval");
 		}, 60_000));
 		this.app.workspace.onLayoutReady(() => {
 			void this.runAutomaticTodayRefresh("startup");
 		});
 	}
+
+	private async createTaskFromEditor(
+		editor: Editor,
+		view: { file: TFile | null },
+	): Promise<void> {
+		try {
+			const defaultParentId = this.marvinParentIdForFile(view.file);
+			await this.refreshLabelsForProjection();
+			if (editor.somethingSelected() && editor.getSelection().length > 2) {
+				await this.insertCreatedTask(
+					editor,
+					view,
+					defaultParentId ?? "",
+					editor.getSelection(),
+					true,
+				);
+				return;
+			}
+
+			const categories = await this.getCategories();
+			new AddTaskModal(this.app, categories, (taskDetails) => {
+				void this.insertCreatedTask(
+					editor,
+					view,
+					taskDetails.catId,
+					taskDetails.task,
+					false,
+				);
+			}, defaultParentId).open();
+		} catch (error) {
+			console.error("Error fetching Amazing Marvin categories:", error);
+			new Notice("Failed to load categories from Amazing Marvin.");
+		}
+	}
+
+	private async insertCreatedTask(
+		editor: Editor,
+		view: { file: TFile | null },
+		parentId: string,
+		title: string,
+		replaceSelection: boolean,
+	): Promise<void> {
+		try {
+			const task = await this.addMarvinTask(
+				parentId,
+				title,
+				view.file?.path,
+				this.app.vault.getName(),
+			);
+			const line = `- [${task.done ? "x" : " "}] ${this.renderTaskBody(task)}`;
+			if (replaceSelection) {
+				editor.replaceSelection(line);
+			} else {
+				editor.replaceRange(line, editor.getCursor());
+			}
+		} catch (error) {
+			console.error("Could not create Marvin task:", error);
+		}
+	}
+
+	private async importFromMarvin(): Promise<void> {
+		const notice = new Notice("Importing from Amazing Marvin...");
+		animateNotice(notice);
+		try {
+			await this.sync();
+			notice.hide();
+			new Notice("Amazing Marvin data imported successfully.");
+		} catch (error) {
+			console.error("Sync error:", error);
+			new Notice("Error syncing with Amazing Marvin.");
+		}
+	}
+
+	private async refreshTodayFromEditor(view: { file: TFile | null }): Promise<void> {
+		try {
+			if (!view.file) {
+				throw new Error("Open the daily note you want to refresh");
+			}
+			const fileDate = getDateFromFile(view.file, "day");
+			if (!fileDate) {
+				throw new Error(`${view.file.path} is not recognized as a daily note`);
+			}
+			const date = fileDate.format("YYYY-MM-DD");
+			const result = await this.refreshTodayTasks({ date, filePath: view.file.path });
+			new Notice(
+				result.changed
+					? `Refreshed Amazing Marvin tasks for ${date}.`
+					: `Amazing Marvin tasks for ${date} are already current.`,
+			);
+		} catch (error) {
+			new Notice(`Error refreshing today's tasks: ${this.errorMessage(error)}`);
+			console.error("Error refreshing today's tasks:", error);
+		}
+	}
+
 	async addMarvinTask(catId: string, taskTitle: string, notePath: string = '', vaultName: string = ''): Promise<Task> {
 		const requestBody: AddTaskRequest = {
 			title: taskTitle.trim(),
@@ -373,8 +414,8 @@ export default class AmazingMarvinPlugin extends Plugin {
 				taskId,
 				getAMTimezoneOffset(),
 			);
-			const note = document.createDocumentFragment();
-			const a = document.createElement('a');
+			const note = createFragment();
+			const a = activeDocument.createElement('a');
 			a.href = 'https://app.amazingmarvin.com/#t=' + taskId;
 			a.target = '_blank';
 			a.text = 'Task';
@@ -1080,9 +1121,9 @@ export default class AmazingMarvinPlugin extends Plugin {
 	}
 
 	private showManualActionError(message: string, href: string) {
-		const errorNote = document.createDocumentFragment();
+		const errorNote = createFragment();
 		errorNote.appendText(message);
-		const link = document.createElement('a');
+		const link = activeDocument.createElement('a');
 		link.href = href;
 		link.text = 'manually';
 		link.target = '_blank';
