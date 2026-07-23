@@ -1,5 +1,6 @@
 import { App, Platform, PluginSettingTab, Setting } from "obsidian";
 import AmazingMarvinPlugin from "./main";
+import type { ObsidianLinkFormat } from "./marvin/obsidianLinks";
 
 export interface AmazingMarvinPluginSettings {
 	linkBackToObsidianText: string;
@@ -12,6 +13,9 @@ export interface AmazingMarvinPluginSettings {
 	showStartDate: boolean;
 	showScheduledDate: boolean;
 	todayTasksToShow: 'due' | 'scheduled' | 'both';
+	autoRefreshTodayTasks: boolean;
+	todayRefreshIntervalMinutes: number;
+	obsidianLinkFormat: ObsidianLinkFormat;
 }
 
 export const DEFAULT_SETTINGS: AmazingMarvinPluginSettings = {
@@ -24,7 +28,10 @@ export const DEFAULT_SETTINGS: AmazingMarvinPluginSettings = {
 	showStartDate: true,
 	showScheduledDate: true,
 	todayTasksToShow: 'both',
-	attemptToMarkTasksAsDone: false
+	autoRefreshTodayTasks: true,
+	todayRefreshIntervalMinutes: 5,
+	obsidianLinkFormat: "advanced-uri",
+	attemptToMarkTasksAsDone: false,
 };
 
 export class AmazingMarvinSettingsTab extends PluginSettingTab {
@@ -96,6 +103,32 @@ private a(href: string, text: string) {
 			);
 
 		new Setting(containerEl)
+			.setName("Refresh managed Today tasks automatically")
+			.setDesc("Refresh an initialized managed region while Obsidian is open and when the window regains focus.")
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.autoRefreshTodayTasks)
+				.onChange(async (value) => {
+					this.plugin.settings.autoRefreshTodayTasks = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Refresh interval")
+			.setDesc("Minutes between background refreshes. Existing notes are only changed after their managed region has been initialized.")
+			.addText(text => text
+				.setPlaceholder("5")
+				.setValue(this.plugin.settings.todayRefreshIntervalMinutes.toString())
+				.onChange(async (value) => {
+					const parsed = Number.parseInt(value, 10);
+					if (Number.isFinite(parsed) && parsed > 0) {
+						this.plugin.settings.todayRefreshIntervalMinutes = parsed;
+						await this.plugin.saveSettings();
+					}
+				})
+			);
+
+		new Setting(containerEl)
 			.setHeading().setName("Task creation");
 
 
@@ -115,6 +148,19 @@ private a(href: string, text: string) {
 						this.plugin.settings.linkBackToObsidianText = value.trim();
 						await this.plugin.saveSettings();
 					})
+			);
+
+		new Setting(containerEl)
+			.setName("Obsidian link format")
+			.setDesc("Advanced URI restores links for workflows using the Advanced URI community plugin; Standard works with Obsidian itself.")
+			.addDropdown(dropdown => dropdown
+				.addOption("advanced-uri", "Advanced URI")
+				.addOption("standard", "Standard Obsidian URI")
+				.setValue(this.plugin.settings.obsidianLinkFormat)
+				.onChange(async (value: ObsidianLinkFormat) => {
+					this.plugin.settings.obsidianLinkFormat = value;
+					await this.plugin.saveSettings();
+				})
 			);
 
 
