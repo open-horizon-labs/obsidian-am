@@ -151,6 +151,21 @@ describe("MarvinRouter", () => {
 		expect(publicApi.requests).toHaveLength(1);
 	});
 
+	it("routes and caches the stable label list", async () => {
+		const publicApi = new QueueTransport(
+			jsonResponse(200, [{ _id: "label-1", title: "Knowledge work" }]),
+		);
+		const router = new MarvinRouter({
+			publicClient: api("public", publicApi),
+		});
+
+		expect((await router.getLabels()).data).toEqual([
+			{ _id: "label-1", title: "Knowledge work" },
+		]);
+		expect((await router.getLabels()).freshness).toBe("cached");
+		expect(publicApi.requests).toHaveLength(1);
+	});
+
 	it("coalesces concurrent reads for the same key", async () => {
 		let release: ((value: MarvinTransportResponse) => void) | undefined;
 		let calls = 0;

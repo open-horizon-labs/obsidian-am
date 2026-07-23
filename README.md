@@ -124,9 +124,28 @@ Additional object-returning methods are available for automation:
 - `getToday(date)`
 - `getDue(date)`
 - `getTodayAndDue(date)`
+- `getLabels()`
 - `createTask(task)`
 - `ensureTaskForSource(input)`
 - `refreshTodayTasks(input)`
+
+### Task formatting and labels
+
+The default projection remains the existing Dataview format. In settings,
+tasks can instead use Obsidian Tasks' Dataview fields or emoji date format.
+Tasks-compatible presets always put the readable title first; the current
+Dataview preset has a separate title-first option.
+
+Dataview date links use a configurable Moment format. For example,
+`YYYY-[W]WW` renders `2026-07-23` as `[[2026-W30|2026-07-23]]`, which lets a
+daily date alias resolve to a weekly note. An optional task tag supports an
+Obsidian Tasks global filter.
+
+Marvin labels can be projected as namespaced Obsidian tags such as
+`#marvin/Knowledge-work`. Label IDs are resolved through the limited `/labels`
+API and cached for an hour; unknown IDs are not exposed as opaque tags. If
+labels are enabled and cannot be read or recovered from the stale cache, the
+managed projection is left unchanged rather than silently removing tags.
 
 ### Auto-Mark as Done Feature
 
@@ -225,12 +244,15 @@ The initial tool surface is deliberately small:
 
 - `marvin_today`
 - `marvin_due`
+- `marvin_labels`
 - `marvin_create_task`
 - `marvin_mark_done`
 
 Read results identify whether data is fresh, cached, or stale. Errors retain
 the attempted local/public origins and throttling details. The server uses the
 limited API token only; it does not use Marvin's full-access CouchDB API.
+`marvin_create_task` accepts the stable label IDs returned by
+`marvin_labels`.
 
 The MCP owns Marvin-only operations and does not edit an Obsidian vault.
 Cross-system operations that must atomically persist a source/action

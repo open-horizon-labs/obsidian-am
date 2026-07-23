@@ -15,6 +15,7 @@ import {
 } from "./interfaces";
 import {
 	type AddTaskRequest,
+	type Label,
 	type MarvinItem,
 	type MarvinReadResult,
 	type TaskOrProject,
@@ -71,6 +72,13 @@ import {
 	type TodayProjectionItem,
 } from "./marvin/todayProjection";
 import { runTodayProjection } from "./marvin/todayWorkflow";
+import {
+	formatTaskMetadata,
+	formatMarvinLabelTags,
+	orderTaskBody,
+	taskTitleComesFirst,
+	type TaskFormattingOptions,
+} from "./marvin/taskFormatting";
 
 function getAMTimezoneOffset() {
 	return new Date().getTimezoneOffset() * -1;
@@ -104,6 +112,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 	private sourceActionStore?: ObsidianSourceActionStore;
 	private sourceActionService?: SourceActionService;
 	private sourceActionRouter?: MarvinRouter;
+	private marvinLabelsById = new Map<string, Label>();
 	private readonly todayRefreshes = new Map<string, Promise<RefreshTodayTasksResult>>();
 	private lastAutomaticRefreshAt = 0;
 	private lastAutomaticRefreshError = "";
@@ -112,6 +121,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 		getToday: (date) => this.getMarvinRouter().getTodayItems(date),
 		getDue: (date) => this.getMarvinRouter().getDueItems(date),
 		getTodayAndDue: (date) => this.getMarvinRouter().getTodayAndDue(date),
+		getLabels: () => this.getMarvinRouter().getLabels(),
 		createTask: async (task) => {
 			const created = await this.getMarvinRouter().addTask(task);
 			this.queueManagedTodayRefresh("creating a task");
@@ -182,11 +192,14 @@ export default class AmazingMarvinPlugin extends Plugin {
         // Fetch categories first and make sure they are loaded
         try {
 			const defaultParentId = this.marvinParentIdForFile(view.file);
+			await this.refreshLabelsForProjection();
           // If a region of text is selected, at least 3 characters long, use that to add a new task and skip the modal
           if (editor.somethingSelected() && editor.getSelection().length > 2) {
             try {
               const task = await this.addMarvinTask(defaultParentId ?? '', editor.getSelection(), view.file?.path, this.app.vault.getName());
-              editor.replaceSelection(`- [${task.done ? 'x' : ' '}] [⚓](${task.deepLink}) ${this.formatTaskDetails(task as Task, '')} ${task.title}`);
+              editor.replaceSelection(
+				`- [${task.done ? 'x' : ' '}] ${this.renderTaskBody(task)}`,
+			  );
             } catch (error) {
               console.error('Could not create Marvin task:', error);
             }
@@ -197,7 +210,10 @@ export default class AmazingMarvinPlugin extends Plugin {
           new AddTaskModal(this.app, categories, async (taskDetails: { catId: string, task: string }) => {
             try {
               const task = await this.addMarvinTask(taskDetails.catId, taskDetails.task, view.file?.path, this.app.vault.getName());
-              editor.replaceRange(`- [${task.done ? 'x' : ' '}] [⚓](${task.deepLink}) ${this.formatTaskDetails(task as Task, '')} ${task.title}`, editor.getCursor());
+              editor.replaceRange(
+				`- [${task.done ? 'x' : ' '}] ${this.renderTaskBody(task)}`,
+				editor.getCursor(),
+			  );
             } catch (error) {
               console.error('Could not create Marvin task:', error);
             }
@@ -422,6 +438,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 		date: string,
 		file: TFile,
 	): Promise<RefreshTodayTasksResult> {
+		await this.refreshLabelsForProjection();
 		const workflow = await runTodayProjection({
 			date,
 			read: () => this.readTodaySelection(date),
@@ -455,7 +472,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 				type: item.type ?? "task",
 			});
 			const source = sourceLinks.get(item._id);
-			const details = this.formatTaskDetails(item as Task, "").trim();
+			const details = this.formatTaskDetails(item as Task);
 			return {
 				id: item._id,
 				title: item.title,
@@ -572,6 +589,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 
 
 	async sync() {
+		await this.refreshLabelsForProjection();
 		const categories = await this.getCategories();
 		this.categories = categories;
 		const existingFiles = await this.findManagedImportFiles();
@@ -711,12 +729,11 @@ export default class AmazingMarvinPlugin extends Plugin {
 				categoryContent += `${indentation}- [[${this.wikiTarget(path)}|${this.wikiAlias(item.title)}]] [⚓](${item.deepLink})\n`;
 			} else {
 				if (!isSubtask) { // Only add deep links to top-level tasks
-					taskContent += `${indentation}- [${item.done ? 'x' : ' '}] [⚓](${item.deepLink}) ${this.formatTaskDetails(item as Task, indentation)}`;
+					taskContent += `${indentation}- [${item.done ? 'x' : ' '}] ${this.renderTaskBody(item as Task)}`;
 				} else {
-					taskContent += `${indentation}- [${item.done ? 'x' : ' '}] `;
+					taskContent += `${indentation}- [${item.done ? 'x' : ' '}] ${this.inlineMarkdown(item.title)}`;
 				}
-
-				taskContent += `${this.inlineMarkdown(item.title)}\n`;
+				taskContent += "\n";
 
 				// Recursively format sub-tasks if any
 				if ('subtasks' in item && item.subtasks && Object.keys(item.subtasks).length > 0) {
@@ -743,25 +760,55 @@ export default class AmazingMarvinPlugin extends Plugin {
 		return content;
 	}
 
-	formatTaskDetails(task: Task, indentation: string) {
-		let details = '';
-		const settings = this.settings;
+	formatTaskDetails(task: Task): string {
+		return formatTaskMetadata(
+			task,
+			this.taskFormattingOptions(),
+			this.marvinLabelsById,
+		);
+	}
 
-		if (settings.showDueDate && task.dueDate) {
-			details += `Due Date:: [[${task.dueDate}]] `;
-		}
-		if (settings.showStartDate && task.startDate) {
-			details += `Start Date:: [[${task.startDate}]] `;
-		}
-		if (settings.showScheduledDate && task.day && task.day !== 'unassigned') {
-			details += `Scheduled Date:: [[${task.day}]] `;
-		}
+	private renderTaskBody(task: Task): string {
+		const options = this.taskFormattingOptions();
+		return orderTaskBody(
+			this.inlineMarkdown(task.title),
+			task.deepLink,
+			formatTaskMetadata(task, options, this.marvinLabelsById),
+			taskTitleComesFirst(options),
+		);
+	}
 
-		return details;
+	private taskFormattingOptions(): TaskFormattingOptions {
+		return {
+			format: this.settings.taskMetadataFormat,
+			titleFirst: this.settings.taskTitleFirst,
+			showDueDate: this.settings.showDueDate,
+			showStartDate: this.settings.showStartDate,
+			showScheduledDate: this.settings.showScheduledDate,
+			taskTag: this.settings.taskTag,
+			showMarvinLabelsAsTags: this.settings.showMarvinLabelsAsTags,
+			labelTagPrefix: this.settings.marvinLabelTagPrefix,
+			dateLinkTarget: (date) => {
+				const parsed = moment(date, "YYYY-MM-DD", true);
+				return parsed.isValid()
+					? parsed.format(this.settings.taskDateLinkFormat)
+					: date;
+			},
+		};
 	}
 
 	async createContentForCategory(category: Category): Promise<string> {
-		let content = `# [⚓](${category.deepLink}) ${this.inlineMarkdown(category.title)}\n\n`;
+		const labelTags = this.settings.showMarvinLabelsAsTags
+			? formatMarvinLabelTags(
+				category.labelIds,
+				this.settings.marvinLabelTagPrefix,
+				this.marvinLabelsById,
+			)
+			: [];
+		let content = [
+			`# [⚓](${category.deepLink}) ${this.inlineMarkdown(category.title)}`,
+			...labelTags,
+		].join(" ") + "\n\n";
 
 		// Link to parent category, if it exists
 		if (category.parentId && category.parentId !== "root") {
@@ -877,6 +924,18 @@ export default class AmazingMarvinPlugin extends Plugin {
 			byId.set(itemId, file);
 		}
 		return byId;
+	}
+
+	private async refreshLabelsForProjection(): Promise<void> {
+		if (!this.settings.showMarvinLabelsAsTags) {
+			this.marvinLabelsById.clear();
+			return;
+		}
+		const result = await this.getMarvinRouter().getLabels();
+		this.reportReadState(result, "labels");
+		this.marvinLabelsById = new Map(
+			result.data.map((label) => [label._id, label]),
+		);
 	}
 
 	private getMarvinRouter(): MarvinRouter {

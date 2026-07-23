@@ -9,7 +9,7 @@ allow a later split without making separate repositories a prerequisite.
 | `packages/marvin-client` | Limited-token endpoint models; request/error contract; Node fetch transport; local-first read routing; bounded cache; throttle circuit; stable-ID deduplication; Marvin deep links; source/action state machine | Obsidian vault/UI behavior; MCP schemas; source-note storage |
 | `src/marvin` | Obsidian `requestUrl` transport adapter; source-action frontmatter adapter; bounded Today projection; non-destructive category/project projection | HTTP/API semantics, cache policy, or fallback decisions |
 | Obsidian plugin | Commands, notices, task rendering, vault/editor changes, Obsidian links | A second Marvin API client |
-| `packages/marvin-mcp` | Stdio lifecycle, four tool schemas, tool-facing result/error presentation | A second Marvin API client; Obsidian access; generic LLM orchestration |
+| `packages/marvin-mcp` | Stdio lifecycle, five tool schemas, tool-facing result/error presentation | A second Marvin API client; Obsidian access; generic LLM orchestration |
 
 Both runtime adapters construct `MarvinApiClient` instances and one
 `MarvinRouter`. Writes use the public API only. Safe reads may use the desktop
@@ -25,6 +25,11 @@ The router caches successful reads in memory. Empty arrays are successful data;
 errors are never cached as empty results. Stale-on-error responses are marked
 `freshness: "stale"` and carry the current failure. Task creation and
 completion invalidate today, due, and children entries.
+
+The stable label list uses the same local-first route and a longer bounded
+cache. The plugin resolves task `labelIds` to namespaced Obsidian tags, while
+the MCP exposes the same IDs to `marvin_create_task`; neither consumer
+reimplements label API behavior.
 
 ## Source/action and Today projection
 

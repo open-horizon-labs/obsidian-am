@@ -59,6 +59,7 @@ export interface Category extends BaseMarvinItem {
 	title: string;
 	type?: "category";
 	parentId?: string;
+	labelIds?: string[];
 	startDate?: string;
 	dueDate?: string;
 	endDate?: string;
@@ -68,6 +69,16 @@ export interface Category extends BaseMarvinItem {
 	rank?: number;
 	recurring?: boolean;
 	isRecurring?: boolean;
+}
+
+export interface Label extends BaseMarvinItem {
+	title: string;
+	groupId?: string;
+	color?: string;
+	icon?: string;
+	showAs?: "text" | "icon" | "both";
+	isAction?: boolean;
+	isHidden?: boolean;
 }
 
 export type TaskOrProject = Task | Project;
