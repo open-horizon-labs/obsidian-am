@@ -21,9 +21,41 @@ export type MarvinOperations = Pick<
 	| "markDone"
 >;
 
-const dateSchema = z.string()
-	.regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD")
-	.optional();
+// Validate dates in the handler rather than the SDK schema path. MCP schema
+// failures are emitted as text-only protocol errors before a tool handler can
+// return the structured error envelope LLM callers rely on.
+const dateSchema = z.string().optional();
+
+class MarvinMcpInputError extends Error {
+	constructor(
+		readonly field: string,
+		message: string,
+	) {
+		super(message);
+		this.name = "MarvinMcpInputError";
+	}
+
+	toSummary() {
+		return {
+			kind: "input",
+			field: this.field,
+			message: this.message,
+		};
+	}
+}
+
+function requireOptionalDate(
+	value: string | undefined,
+	field: string,
+): string | undefined {
+	if (value === undefined) {
+		return undefined;
+	}
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+		throw new MarvinMcpInputError(field, "Use YYYY-MM-DD");
+	}
+	return value;
+}
 
 function itemForTool(item: MarvinItem) {
 	return {
@@ -72,7 +104,9 @@ function readSuccess(result: MarvinReadResult<MarvinItem[]>) {
 }
 
 function failure(error: unknown) {
-	const details = error instanceof MarvinRouteError
+	const details = error instanceof MarvinMcpInputError
+		? error.toSummary()
+		: error instanceof MarvinRouteError
 		? {
 			message: error.message,
 			attempts: error.attempts.map((attempt) => attempt.toSummary()),
@@ -113,7 +147,9 @@ export function createMarvinMcpServer(
 		},
 	}, async ({ date }) => {
 		try {
-			return readSuccess(await operations.getTodayItems(date));
+			return readSuccess(await operations.getTodayItems(
+				requireOptionalDate(date, "date"),
+			));
 		} catch (error) {
 			return failure(error);
 		}
@@ -131,7 +167,9 @@ export function createMarvinMcpServer(
 		},
 	}, async ({ date }) => {
 		try {
-			return readSuccess(await operations.getDueItems(date));
+			return readSuccess(await operations.getDueItems(
+				requireOptionalDate(date, "date"),
+			));
 		} catch (error) {
 			return failure(error);
 		}
@@ -214,13 +252,15 @@ export function createMarvinMcpServer(
 		},
 	}, async (input) => {
 		try {
+			const day = requireOptionalDate(input.day, "day");
+			const dueDate = requireOptionalDate(input.dueDate, "dueDate");
 			const task = await operations.addTask({
 				title: input.title,
 				timeZoneOffset: new Date().getTimezoneOffset() * -1,
 				...(input.parentId === undefined ? {} : { parentId: input.parentId }),
 				...(input.labelIds === undefined ? {} : { labelIds: input.labelIds }),
-				...(input.day === undefined ? {} : { day: input.day }),
-				...(input.dueDate === undefined ? {} : { dueDate: input.dueDate }),
+				...(day === undefined ? {} : { day }),
+				...(dueDate === undefined ? {} : { dueDate }),
 				...(input.note === undefined ? {} : { note: input.note }),
 				...(input.timeEstimate === undefined ? {} : { timeEstimate: input.timeEstimate }),
 			});

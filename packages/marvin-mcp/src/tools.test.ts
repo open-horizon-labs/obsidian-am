@@ -172,6 +172,24 @@ describe("Amazing Marvin MCP", () => {
 		});
 	});
 
+	it("returns malformed dates in the structured error envelope", async () => {
+		const client = await connect(operations());
+
+		const result = await client.callTool({
+			name: "marvin_today",
+			arguments: { date: "not-a-date" },
+		});
+
+		expect(result.isError).toBe(true);
+		expect(result.structuredContent).toEqual({
+			error: {
+				kind: "input",
+				field: "date",
+				message: "Use YYYY-MM-DD",
+			},
+		});
+	});
+
 	it("routes create and completion tools through the shared operations", async () => {
 		const calls: unknown[] = [];
 		const client = await connect(operations({
