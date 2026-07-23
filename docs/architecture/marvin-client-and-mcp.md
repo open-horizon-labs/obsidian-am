@@ -37,6 +37,27 @@ Selective import remains a plugin projection concern: selected roots include
 descendants, ancestors are structure-only, and deselection never authorizes
 note deletion.
 
+## Incremental cache trust boundary
+
+The optional CouchDB path is intentionally outside `packages/marvin-client`
+and `packages/marvin-mcp`. It uses separate full-database credentials in the
+Obsidian adapter only; the limited-token client remains the hydration source,
+manual fallback, and only Marvin credential surface available to MCP.
+
+Hydration captures a CouchDB checkpoint before reading the REST snapshot through
+a dedicated uncached router, then applies `_changes` from that opaque sequence
+so neither an older memory-cache entry nor an edit during hydration creates a
+gap. Cache updates are idempotent by document revision, checkpoint every bounded
+page, and persist `projectionPending` until all affected managed notes write
+successfully. On restart, a pending projection forces a safe full projection
+even when the feed has no new results.
+
+Task changes target their old/new parent notes or Inbox. Category changes also
+target old/new parents and descendants whose generated paths may change.
+Physical/trash deletion removes cache entries and parent links but does not
+authorize deleting the item's Obsidian note. A serialized projection queue
+prevents manual and automatic imports from racing path moves.
+
 ## Source/action and Today projection
 
 `SourceActionService` persists a pending association before calling Marvin.

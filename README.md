@@ -46,6 +46,39 @@ ancestor tasks are excluded. Inbox import is controlled independently. An
 empty selected-root list intentionally imports no category/project notes, and
 changing the selection never deletes notes from an earlier import.
 
+### Experimental incremental import
+
+The default importer continues to use the limited-token REST API. An opt-in
+incremental mode uses the separate `databaseUri`, `databaseUser`, and
+`databasePassword` values from Marvin's API settings. They are stored with this
+plugin's Obsidian settings, sent only to the configured database, and never
+exposed through the companion MCP. Obsidian may sync plugin settings according
+to the user's Sync configuration. Credential-bearing database URIs and
+non-HTTPS remote URIs are rejected.
+
+On first use, the plugin checkpoints the CouchDB changes feed, hydrates a fresh
+category/children snapshot through a dedicated uncached REST router, and
+catches up from that exact opaque checkpoint. The resulting cache is persisted as
+`marvin-incremental-cache-v1.json` in the plugin directory. Later long-poll
+catch-ups coalesce replayed changes and update only affected managed notes.
+Category moves also target descendants whose paths changed; deleted or
+deselected item notes remain recoverable.
+
+The cache contains Marvin task and category data, so protect the vault and its
+backups as you would the Marvin account.
+
+The checkpoint is saved with a pending-projection marker. If a vault write
+fails or Obsidian exits after the checkpoint advances, the next run performs a
+safe full projection before acknowledging it. Connection failures use bounded
+exponential backoff with no hidden request retries. A manual import falls back
+to REST if the experimental path cannot connect, and settings show the last
+successful catch-up or recoverable error. Use **Reset cache** to force a fresh
+hydration.
+
+See [Amazing Marvin database access](https://github.com/amazingmarvin/MarvinAPI/wiki/Database-Access)
+and [CouchDB `_changes`](https://docs.couchdb.org/en/stable/api/database/changes.html)
+for the upstream credential and checkpoint contracts.
+
 ### Running a Sync
 
 To initiate a sync:
