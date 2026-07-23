@@ -57,7 +57,7 @@ export interface Project extends BaseMarvinItem {
 
 export interface Category extends BaseMarvinItem {
 	title: string;
-	type?: "category";
+	type: "category";
 	parentId?: string;
 	labelIds?: string[];
 	startDate?: string;

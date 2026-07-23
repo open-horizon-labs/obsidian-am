@@ -1,6 +1,18 @@
-import { App, Platform, PluginSettingTab, Setting } from "obsidian";
+import {
+	App,
+	FuzzySuggestModal,
+	Notice,
+	Platform,
+	PluginSettingTab,
+	Setting,
+} from "obsidian";
 import AmazingMarvinPlugin from "./main";
+import type { Category } from "./interfaces";
 import type { ObsidianLinkFormat } from "./marvin/obsidianLinks";
+import type {
+	SyncRootSelection,
+	SyncSelectionMode,
+} from "./marvin/syncSelection";
 import type { TaskMetadataFormat } from "./marvin/taskFormatting";
 
 export interface AmazingMarvinPluginSettings {
@@ -24,6 +36,9 @@ export interface AmazingMarvinPluginSettings {
 	todayRefreshIntervalMinutes: number;
 	obsidianLinkFormat: ObsidianLinkFormat;
 	syncFolder: string;
+	syncSelectionMode: SyncSelectionMode;
+	syncRoots: SyncRootSelection[];
+	syncInbox: boolean;
 }
 
 export const DEFAULT_SETTINGS: AmazingMarvinPluginSettings = {
@@ -46,8 +61,58 @@ export const DEFAULT_SETTINGS: AmazingMarvinPluginSettings = {
 	todayRefreshIntervalMinutes: 5,
 	obsidianLinkFormat: "advanced-uri",
 	syncFolder: "AmazingMarvin",
+	syncSelectionMode: "all",
+	syncRoots: [],
+	syncInbox: true,
 	attemptToMarkTasksAsDone: false,
 };
+
+class SyncRootSuggestModal extends FuzzySuggestModal<Category> {
+	constructor(
+		app: App,
+		private readonly categories: Category[],
+		private readonly choose: (category: Category) => void,
+	) {
+		super(app);
+		this.setPlaceholder("Choose a category or project root");
+	}
+
+	getItems(): Category[] {
+		return this.categories;
+	}
+
+	getItemText(category: Category): string {
+		return categoryDisplayPath(category, this.categories);
+	}
+
+	onChooseItem(category: Category): void {
+		this.choose(category);
+	}
+}
+
+function categoryDisplayPath(
+	category: Category,
+	categories: Category[],
+): string {
+	const segments = [category.title];
+	const visited = new Set([category._id]);
+	let parentId = category.parentId;
+	while (parentId && parentId !== "root") {
+		if (visited.has(parentId)) {
+			segments.unshift("[cycle]");
+			break;
+		}
+		visited.add(parentId);
+		const parent = categories.find((item) => item._id === parentId);
+		if (!parent) {
+			segments.unshift("[missing parent]");
+			break;
+		}
+		segments.unshift(parent.title);
+		parentId = parent.parentId;
+	}
+	return segments.join(" / ");
+}
 
 export class AmazingMarvinSettingsTab extends PluginSettingTab {
 	plugin: AmazingMarvinPlugin;
@@ -111,6 +176,92 @@ private a(href: string, text: string) {
 				.setValue(this.plugin.settings.syncFolder)
 				.onChange(async (value) => {
 					this.plugin.settings.syncFolder = value.trim() || "AmazingMarvin";
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Items to import")
+			.setDesc("Import everything, or selected roots with their descendants. Ancestors are retained as navigation structure; excluded notes are never deleted.")
+			.addDropdown(dropdown => dropdown
+				.addOption("all", "All categories and projects")
+				.addOption("selected", "Selected roots")
+				.setValue(this.plugin.settings.syncSelectionMode)
+				.onChange(async (value: SyncSelectionMode) => {
+					this.plugin.settings.syncSelectionMode = value;
+					await this.plugin.saveSettings();
+					this.display();
+				})
+			);
+
+		if (this.plugin.settings.syncSelectionMode === "selected") {
+			for (const root of this.plugin.settings.syncRoots) {
+				new Setting(containerEl)
+					.setName(root.title)
+					.setDesc(`Marvin ID: ${root.id}`)
+					.addButton(button => button
+						.setButtonText("Remove")
+						.onClick(async () => {
+							this.plugin.settings.syncRoots = (
+								this.plugin.settings.syncRoots.filter(
+									(candidate) => candidate.id !== root.id,
+								)
+							);
+							await this.plugin.saveSettings();
+							this.display();
+						})
+					);
+			}
+
+			new Setting(containerEl)
+				.setName("Add import root")
+				.setDesc(
+					this.plugin.settings.syncRoots.length === 0
+						? "No roots selected. Category/project import will make no changes."
+						: "Selecting a root includes every category and project below it.",
+				)
+				.addButton(button => button
+					.setButtonText("Choose")
+					.onClick(async () => {
+						try {
+							const categories = await this.plugin.getCategories();
+							const selected = new Set(
+								this.plugin.settings.syncRoots.map((root) => root.id),
+							);
+							new SyncRootSuggestModal(
+								this.app,
+								categories.filter((category) => !selected.has(category._id)),
+								(category) => {
+									this.plugin.settings.syncRoots.push({
+										id: category._id,
+										title: categoryDisplayPath(category, categories),
+									});
+									void this.plugin.saveSettings()
+										.then(() => this.display())
+										.catch((error) => {
+											console.error(
+												"Could not save Amazing Marvin import root:",
+												error,
+											);
+											new Notice("Could not save the import root.");
+										});
+								},
+							).open();
+						} catch (error) {
+							console.error("Could not load Amazing Marvin import roots:", error);
+							new Notice("Could not load Amazing Marvin categories and projects.");
+						}
+					})
+				);
+		}
+
+		new Setting(containerEl)
+			.setName("Import Inbox")
+			.setDesc("Update the managed Inbox note independently of category/project selection.")
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.syncInbox)
+				.onChange(async (value) => {
+					this.plugin.settings.syncInbox = value;
 					await this.plugin.saveSettings();
 				})
 			);

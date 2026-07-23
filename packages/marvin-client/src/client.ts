@@ -115,10 +115,15 @@ export class MarvinApiClient {
 	async getCategories(): Promise<(Category | Project)[]> {
 		const endpoint = "/categories";
 		const value = await this.requestJson("categories", endpoint, "GET");
-		return requireArray<Category | Project>(
+		const categories = requireArray<Category | Project>(
 			value,
 			this.context("categories", endpoint, "GET"),
 		);
+		return categories.map((item) => (
+			item.type === "project"
+				? item
+				: { ...item, type: "category" }
+		));
 	}
 
 	async getLabels(): Promise<Label[]> {

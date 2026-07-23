@@ -70,6 +70,20 @@ describe("MarvinApiClient", () => {
 		}]);
 	});
 
+	it("normalizes categories without a type discriminator", async () => {
+		const transport = new QueueTransport(
+			jsonResponse(200, [
+				{ _id: "category-1", title: "Work" },
+				{ _id: "project-1", title: "Book", type: "project" },
+			]),
+		);
+
+		await expect(client(transport).getCategories()).resolves.toEqual([
+			{ _id: "category-1", title: "Work", type: "category" },
+			{ _id: "project-1", title: "Book", type: "project" },
+		]);
+	});
+
 	it("does not retry a throttled request", async () => {
 		const transport = new QueueTransport({
 			status: 429,
