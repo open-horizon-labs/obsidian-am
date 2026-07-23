@@ -1,4 +1,4 @@
-# Obsidian Amazing Marvin Plugin
+# Amazing Marvin Integration for Obsidian
 
 This plugin brings Amazing Marvin tasks, categories, and projects into
 [Obsidian](https://obsidian.md) without treating the vault as disposable. It
@@ -18,7 +18,7 @@ two surfaces share the same client, local-first read behavior, cache rules, and
 error model. Run the relevant plugin refresh or import to project a task an
 agent creates through MCP into the vault.
 
-## Amazing Marvin Plugin Overview
+## Plugin overview
 
 The Amazing Marvin Plugin provides a way to bring your tasks and project structures from Amazing Marvin directly into your Obsidian vault. It respects the Amazing Marvin hierarchy of categories and projects, creating a matching folder and note structure within Obsidian.
 
@@ -83,7 +83,7 @@ To initiate a sync:
 
 Once imported, your Obsidian vault will contain the configured managed folder. Inside, you'll find the structured notes corresponding to your categories and projects from Amazing Marvin.
 
-Before importing, use **Settings → Obsidian Amazing Marvin Plugin → Category
+Before importing, use **Settings → Amazing Marvin Integration → Category
 and project import** to choose the managed folder, all items or selected roots,
 and whether Inbox is included. A selected root includes all descendants;
 changing the selection deliberately leaves older notes in place for review.
@@ -108,17 +108,19 @@ or another parent in the modal.
 To create a task:
 
 1. Open Obsidian's Command Palette with `Ctrl/Cmd + P`.
-2. Search for and select the command `Create Marvin Task`.
+2. Search for and select the command `Amazing Marvin Integration: Create task`.
 3. Input the task details and select the appropriate category from the dropdown, which shows suggestions as you type.
 4. Upon task creation, a markdown checklist item with a link to the Marvin task is inserted at your cursor location in Obsidian.
 
 ### Keeping Today's Tasks Current
 
-Run `Amazing Marvin: Refresh today's tasks` from a daily note. On the first
-run, the plugin adopts existing Marvin checklist entries under
-`## Today's tasks` as the morning set and surrounds only the generated task
-content with managed HTML-comment markers. It never rewrites content outside
-those markers.
+Run `Amazing Marvin Integration: Refresh today's tasks` from a daily note. On
+the first run, the plugin adopts existing Marvin checklist entries under
+`## Today's tasks` as the morning set and surrounds the recognized generated
+task content with managed HTML-comment markers. Copy completed legacy task
+history out before that first refresh: current Marvin reads may not return it,
+so it is not retained by the live projection. Content outside the recognized
+legacy checklist and later managed region is preserved.
 
 Later scheduled and due tasks appear under `### Added since morning`. Results
 are deduplicated by Marvin task ID, completion state is rerendered from Marvin,
@@ -198,7 +200,7 @@ One of the highlights in this version is the ability to auto-mark tasks as done 
 
 Here's how to enable this feature:
 
-1. Go to `Settings > Obsidian Amazing Marvin Plugin`.
+1. Go to `Settings > Amazing Marvin Integration`.
 2. Check the option `Attempt to mark tasks as done in Amazing Marvin when checked off in Obsidian`.
 3. Save your settings.
 
@@ -225,17 +227,34 @@ By following these guidelines, you can ensure your Amazing Marvin data is accura
 2. Open BRAT settings (`Settings` -> `BRAT`)
     1. Scroll to the `Beta Plugin List` section
     2. `Add Beta Plugin`
-    3. Specify this repository: `cloud-atlas-ai/obsidian-am`
-3. Enable the `Amazing Marvin` plugin (`Settings` -> `Community Plugins`)
+    3. Specify this repository: `open-horizon-labs/obsidian-am`
+3. Enable **Amazing Marvin Integration** (`Settings` -> `Community Plugins`)
 
 ### Manually
 
 1. If you haven't enabled community plugins in Obsidian, follow these [instructions](https://help.obsidian.md/Extending+Obsidian/Community+plugins#Install+a+community+plugin) to do so.
-2. Download `cloudatlas-obsidian-am.zip` from the [releases](https://github.com/cloud-atlas-ai/obsidian-am/releases).
-3. Unzip the release and copy the directory into your vault's plugins folder: `<vault>/.obsidian/plugins/cloudatlas-o-am`.
-4. Restart Obsidian to recognize the new plugin.
-5. In Obsidian's settings under "Community Plugins," find and enable the Obsidian Amazing Marvin Plugin.
-6. Add your key token to the plugin settings. You can find your key token in the [Amazing Marvin API page](https://app.amazingmarvin.com/pre?api).
+2. From the desired [release](https://github.com/open-horizon-labs/obsidian-am/releases), download `main.js`, `manifest.json`, and `styles.css`.
+3. Copy those files into `<vault>/.obsidian/plugins/cloudatlas-o-am`.
+4. Restart Obsidian and enable **Amazing Marvin Integration** under Community Plugins.
+5. Add your limited Marvin API token in the plugin settings. Find it in the [Amazing Marvin API page](https://app.amazingmarvin.com/pre?api).
+
+## Trust boundaries
+
+The plugin reads and writes only the vault files needed for its configured
+workflows: imported Marvin notes and their managed regions, initialized Today
+regions, and task lines or source associations created through its commands or
+automation API. It does not delete arbitrary vault files; when an imported
+Marvin item disappears, its existing note is left for you to review.
+
+The plugin uses Marvin's limited API token for its public API and can use the
+local Marvin desktop API for reads when enabled. Marvin links and help links
+open `app.amazingmarvin.com` and `help.amazingmarvin.com`; API requests use
+`serv.amazingmarvin.com` or the configured local server. Keep the token in
+plugin settings or a local secret mechanism, never in a shared note.
+
+The companion MCP is a separate local stdio process. It can operate on Marvin,
+but it does not edit the vault; use the plugin's in-Obsidian API when a
+workflow must both create a task and record its source note.
 
 ## Development
 
