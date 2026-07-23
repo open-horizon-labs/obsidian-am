@@ -51,7 +51,7 @@ changing the selection never deletes notes from an earlier import.
 To initiate a sync:
 
 1. Open Obsidian's Command Palette with `Ctrl/Cmd + P`.
-2. Search for and select `Import categories and tasks`.
+2. Search for and select the command `Amazing Marvin Integration: Import categories and tasks`.
 3. The plugin will then proceed to update your Obsidian vault with the current structure and content from Amazing Marvin.
 
 Once imported, your Obsidian vault will contain the configured managed folder. Inside, you'll find the structured notes corresponding to your categories and projects from Amazing Marvin.
