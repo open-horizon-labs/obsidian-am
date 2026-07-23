@@ -311,7 +311,7 @@ function findLegacyRegion(
 		start = lines.findIndex((line, index) => (
 			index >= bodyStart
 			&& line.startsWith("# ")
-			&& line.includes(`https://app.amazingmarvin.com/#p=${itemId}`)
+			&& hasProjectAnchor(line, itemId)
 		));
 	} else {
 		start = lines.findIndex((line, index) => (
@@ -350,6 +350,12 @@ function findLegacyRegion(
 		end = Math.min(end, pendingBlank);
 	}
 	return { start, end };
+}
+
+function hasProjectAnchor(line: string, itemId: string): boolean {
+	return line.includes(
+		`[⚓](https://app.amazingmarvin.com/#p=${itemId})`,
+	);
 }
 
 function firstNonBlankLine(lines: string[], start: number): string | undefined {
