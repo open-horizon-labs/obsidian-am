@@ -1,6 +1,7 @@
 import type {
 	AddTaskRequest,
 	EnsureSourceActionResult,
+	Label,
 	MarvinReadResult,
 	ResolvePendingSourceActionRequest,
 	TaskOrProject,
@@ -44,6 +45,7 @@ export interface AmazingMarvinApi {
 	getToday(date: string): Promise<MarvinReadResult<TaskOrProject[]>>;
 	getDue(date: string): Promise<MarvinReadResult<TaskOrProject[]>>;
 	getTodayAndDue(date: string): Promise<MarvinReadResult<TaskOrProject[]>>;
+	getLabels(): Promise<MarvinReadResult<Label[]>>;
 	createTask(task: AddTaskRequest): Promise<TaskOrProject>;
 	ensureTaskForSource(
 		input: EnsureTaskForSourceInput,

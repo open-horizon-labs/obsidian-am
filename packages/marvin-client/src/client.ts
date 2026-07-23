@@ -2,6 +2,7 @@ import { asMarvinError, MarvinError } from "./errors.js";
 import type {
 	AddTaskRequest,
 	Category,
+	Label,
 	MarkDoneResult,
 	MarvinOrigin,
 	MarvinTransport,
@@ -117,6 +118,15 @@ export class MarvinApiClient {
 		return requireArray<Category | Project>(
 			value,
 			this.context("categories", endpoint, "GET"),
+		);
+	}
+
+	async getLabels(): Promise<Label[]> {
+		const endpoint = "/labels";
+		const value = await this.requestJson("labels", endpoint, "GET");
+		return requireArray<Label>(
+			value,
+			this.context("labels", endpoint, "GET"),
 		);
 	}
 

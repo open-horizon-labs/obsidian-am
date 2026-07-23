@@ -11,6 +11,7 @@ import {
 import type {
 	AddTaskRequest,
 	Category,
+	Label,
 	MarkDoneResult,
 	MarvinErrorSummary,
 	MarvinItem,
@@ -29,9 +30,10 @@ const DEFAULT_CACHE_POLICIES = {
 	due: { freshTtlMs: 30_000, staleIfErrorMs: 10 * 60_000 },
 	children: { freshTtlMs: 60_000, staleIfErrorMs: 15 * 60_000 },
 	categories: { freshTtlMs: 5 * 60_000, staleIfErrorMs: 60 * 60_000 },
+	labels: { freshTtlMs: 60 * 60_000, staleIfErrorMs: 24 * 60 * 60_000 },
 } satisfies Record<ReadKind, MarvinCachePolicy>;
 
-type ReadKind = "today" | "due" | "children" | "categories";
+type ReadKind = "today" | "due" | "children" | "categories" | "labels";
 
 export interface MarvinRouterOptions {
 	publicClient: MarvinApiClient;
@@ -110,6 +112,15 @@ export class MarvinRouter {
 			this.policies.categories,
 			"categories",
 			(client) => client.getCategories(),
+		);
+	}
+
+	getLabels(): Promise<MarvinReadResult<Label[]>> {
+		return this.readThrough(
+			"labels",
+			this.policies.labels,
+			"labels",
+			(client) => client.getLabels(),
 		);
 	}
 
