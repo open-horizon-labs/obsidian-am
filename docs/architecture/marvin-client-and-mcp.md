@@ -6,8 +6,8 @@ allow a later split without making separate repositories a prerequisite.
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| `packages/marvin-client` | Limited-token endpoint models; request/error contract; Node fetch transport; local-first read routing; bounded cache; throttle circuit; stable-ID deduplication; Marvin deep links | Obsidian vault/UI behavior; MCP schemas; source-note identity |
-| `src/marvin` | Obsidian `requestUrl` transport adapter | HTTP/API semantics, cache policy, or fallback decisions |
+| `packages/marvin-client` | Limited-token endpoint models; request/error contract; Node fetch transport; local-first read routing; bounded cache; throttle circuit; stable-ID deduplication; Marvin deep links; source/action state machine | Obsidian vault/UI behavior; MCP schemas; source-note storage |
+| `src/marvin` | Obsidian `requestUrl` transport adapter; source-action frontmatter adapter; bounded Today projection | HTTP/API semantics, cache policy, or fallback decisions |
 | Obsidian plugin | Commands, notices, task rendering, vault/editor changes, Obsidian links | A second Marvin API client |
 | `packages/marvin-mcp` | Stdio lifecycle, four tool schemas, tool-facing result/error presentation | A second Marvin API client; Obsidian access; generic LLM orchestration |
 
@@ -26,19 +26,27 @@ errors are never cached as empty results. Stale-on-error responses are marked
 `freshness: "stale"` and carry the current failure. Task creation and
 completion invalidate today, due, and children entries.
 
-## Extension seam for #51
+## Source/action and Today projection
 
-The next layer should add deterministic integration operations above this
-client:
+`SourceActionService` persists a pending association before calling Marvin.
+Ambiguous transport, 5xx, or invalid-success responses retain that pending
+record, so an unattended retry cannot create another task. Definite 4xx
+rejections clear the pending state. A successful write promotes it to a linked
+record containing the Marvin task ID and deep link.
 
-- ensure one Marvin task for a stable Obsidian source/action key;
-- persist the resulting Marvin ID/deep link back to the source note; and
-- refresh a bounded daily-note region by stable Marvin ID without overwriting
-  surrounding prose.
+The Obsidian adapter stores those records in the source note's
+`amazing-marvin-actions` frontmatter property. Daily-note refresh reads the
+linked task IDs to render a source wikilink when one exists. Tasks created
+directly in Marvin render normally without a synthetic source note.
 
-That source/action identity is not a task title and does not belong in MCP
-prompt text. The Obsidian projection remains responsible for note mutation;
-the shared client remains responsible for Marvin state and explicit failures.
+The managed Today region stores its initial morning IDs in a versioned HTML
+comment. Refresh atomically replaces only that region against the latest note
+contents; new IDs render below the morning list, and content outside the
+markers is preserved.
+
+Source/action identity is not a task title and does not belong in MCP prompt
+text. The Obsidian projection remains responsible for note mutation; the
+shared client remains responsible for Marvin state and explicit failures.
 
 ## Upstream and security boundary
 
