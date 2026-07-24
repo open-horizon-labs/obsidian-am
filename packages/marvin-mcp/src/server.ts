@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -5,7 +6,8 @@ import {
 	MarvinApiClient,
 	MarvinRouter,
 } from "@open-horizon/marvin-client";
-import { createMarvinMcpServer } from "./tools.js";
+import { createCachePreferringOperations } from "./incrementalCacheOperations.js";
+import { createMarvinMcpServer, type MarvinOperations } from "./tools.js";
 
 export interface MarvinMcpEnvironment {
 	[key: string]: string | undefined;
@@ -13,6 +15,11 @@ export interface MarvinMcpEnvironment {
 	AMAZING_MARVIN_PUBLIC_API_URL?: string;
 	AMAZING_MARVIN_USE_LOCAL?: string;
 	AMAZING_MARVIN_LOCAL_API_URL?: string;
+	// Points at the same marvin-incremental-cache-v1.json the Obsidian
+	// plugin's incremental sync already maintains, if the user has that
+	// enabled. Optional — REST remains the default with no config at all.
+	AMAZING_MARVIN_INCREMENTAL_CACHE_PATH?: string;
+	AMAZING_MARVIN_INCREMENTAL_CACHE_MAX_AGE_MS?: string;
 }
 
 export function createRouterFromEnvironment(
@@ -47,10 +54,26 @@ export function createRouterFromEnvironment(
 	});
 }
 
+export function createOperationsFromEnvironment(
+	environment: MarvinMcpEnvironment = process.env,
+): MarvinOperations {
+	const router = createRouterFromEnvironment(environment);
+	const cachePath = environment.AMAZING_MARVIN_INCREMENTAL_CACHE_PATH?.trim();
+	if (!cachePath) {
+		return router;
+	}
+	const maxAgeMs = Number(environment.AMAZING_MARVIN_INCREMENTAL_CACHE_MAX_AGE_MS);
+	return createCachePreferringOperations(router, {
+		cachePath,
+		readFile: (path) => readFile(path, "utf8"),
+		...(Number.isFinite(maxAgeMs) && maxAgeMs > 0 ? { maxAgeMs } : {}),
+	});
+}
+
 export async function runMcpServer(
 	environment: MarvinMcpEnvironment = process.env,
 ): Promise<void> {
-	const server = createMarvinMcpServer(createRouterFromEnvironment(environment));
+	const server = createMarvinMcpServer(createOperationsFromEnvironment(environment));
 	await server.connect(new StdioServerTransport());
 	console.error("Amazing Marvin MCP server running on stdio");
 }
