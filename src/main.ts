@@ -687,10 +687,14 @@ export default class AmazingMarvinPlugin extends Plugin {
 		if (!this.settings.incrementalSyncEnabled) {
 			return undefined;
 		}
-		const { databaseUri, databaseUser, databasePassword } = this.settings;
-		if (!databaseUri.trim() || !databaseUser.trim() || !databasePassword) {
+		const { databaseServer, databaseName, databaseUser, databasePassword } = this.settings;
+		if (!databaseServer.trim() || !databaseName.trim() || !databaseUser.trim() || !databasePassword) {
 			return undefined;
 		}
+		// Stored as the two fields Amazing Marvin's own API settings page
+		// shows (server, database) for copy-paste convenience; joined back
+		// into the one URI the shared CouchDB clients expect.
+		const databaseUri = `${databaseServer.trim().replace(/\/+$/, "")}/${databaseName.trim().replace(/^\/+/, "")}`;
 		const key = JSON.stringify([databaseUri, databaseUser, databasePassword]);
 		if (this.incrementalCache && this.incrementalCacheKey === key) {
 			return this.incrementalCache;
