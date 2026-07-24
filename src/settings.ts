@@ -40,7 +40,11 @@ export interface AmazingMarvinPluginSettings {
 	syncRoots: SyncRootSelection[];
 	syncInbox: boolean;
 	incrementalSyncEnabled: boolean;
-	databaseUri: string;
+	// Split to match Amazing Marvin's own API settings page (server,
+	// database, user, pass as four separate fields) so credentials can be
+	// copy-pasted directly instead of hand-assembled into one URI.
+	databaseServer: string;
+	databaseName: string;
 	databaseUser: string;
 	databasePassword: string;
 }
@@ -70,7 +74,8 @@ export const DEFAULT_SETTINGS: AmazingMarvinPluginSettings = {
 	syncInbox: true,
 	attemptToMarkTasksAsDone: false,
 	incrementalSyncEnabled: false,
-	databaseUri: "",
+	databaseServer: "",
+	databaseName: "",
 	databaseUser: "",
 	databasePassword: "",
 };
@@ -302,13 +307,24 @@ private a(href: string, text: string) {
 
 		if (this.plugin.settings.incrementalSyncEnabled) {
 			new Setting(containerEl)
-				.setName("Database URI")
-				.setDesc("Full HTTPS database URI from Amazing Marvin's API settings. Credentials embedded in the URI are rejected — use the fields below.")
+				.setName("Database server")
+				.setDesc("From Amazing Marvin's API settings page — the server field, without the database name.")
 				.addText(text => text
-					.setPlaceholder("https://.../database")
-					.setValue(this.plugin.settings.databaseUri)
+					.setPlaceholder("https://your-instance.cloudant.com")
+					.setValue(this.plugin.settings.databaseServer)
 					.onChange(async (value) => {
-						this.plugin.settings.databaseUri = value.trim();
+						this.plugin.settings.databaseServer = value.trim();
+						await this.plugin.saveSettings();
+					})
+				);
+
+			new Setting(containerEl)
+				.setName("Database name")
+				.addText(text => text
+					.setPlaceholder("u1234567")
+					.setValue(this.plugin.settings.databaseName)
+					.onChange(async (value) => {
+						this.plugin.settings.databaseName = value.trim();
 						await this.plugin.saveSettings();
 					})
 				);
