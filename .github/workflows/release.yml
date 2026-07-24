@@ -76,8 +76,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
+          # BETA_RELEASE_NOTES.md is per-release and removed after use, not
+          # a standing changelog — a beta that ships without one falls back
+          # to the generic message rather than failing.
+          if [ -f BETA_RELEASE_NOTES.md ]; then
+            NOTES_ARGS=(--notes-file BETA_RELEASE_NOTES.md)
+          else
+            NOTES_ARGS=(--notes "Automated beta release for version $VERSION")
+          fi
           gh release create "$VERSION" \
             --prerelease \
             --title="$VERSION" \
-            --notes "Automated beta release for version $VERSION" \
+            "${NOTES_ARGS[@]}" \
             dist/main.js dist/styles.css dist/manifest.json

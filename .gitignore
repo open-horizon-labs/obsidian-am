@@ -23,3 +23,13 @@ data.json
 
 dist/**
 packages/*/dist/**
+
+# Real Marvin database/API credentials and dumps used for local fixture
+# capture. Never commit these — see evaluations/issue-55/README.md.
+evaluations/issue-55/.env.marvin-db
+evaluations/issue-55/.env.marvin-api
+evaluations/issue-55/*.raw.json
+evaluations/issue-55/harness/vault-scratch/
+
+# Local RNA/OH indexing tool cache — machine-generated, not source.
+.oh/.cache/

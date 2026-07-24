@@ -108,3 +108,38 @@ export function categoryProjectionItems<T extends SyncProjectionItem>(
 		|| plan.includedIds.has(item._id)
 	));
 }
+
+/** Which of an incremental sync's affected containers should actually be
+ * re-rendered — the intersection with the user's selective-import plan.
+ * A category the user excluded from import must not start appearing just
+ * because it changed in Marvin; incremental sync must respect the same
+ * selection boundary the REST importer already does. */
+export function targetedContainerIds(
+	affectedContainerIds: readonly string[],
+	plan: CategorySyncPlan,
+): Set<string> {
+	return new Set(
+		affectedContainerIds.filter((id) => plan.includedIds.has(id)),
+	);
+}
+
+/** Narrows a full plan down to just the targeted ids, preserving the real
+ * content-vs-structural distinction — a targeted ancestor that's
+ * structure-only in the full plan must stay structure-only here too.
+ * Collapsing everything targeted into contentIds would render full content
+ * for a note that's meant to show navigation-only links. */
+export function buildTargetedPlan(
+	targetedIds: ReadonlySet<string>,
+	fullPlan: CategorySyncPlan,
+): CategorySyncPlan {
+	const contentIds = new Set(
+		[...targetedIds].filter((id) => fullPlan.contentIds.has(id)),
+	);
+	return {
+		includedIds: targetedIds,
+		contentIds,
+		structuralIds: new Set(
+			[...targetedIds].filter((id) => !contentIds.has(id)),
+		),
+	};
+}

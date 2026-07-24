@@ -74,8 +74,10 @@ import {
 } from "./marvin/todayProjection";
 import { runTodayProjection } from "./marvin/todayWorkflow";
 import {
+	buildTargetedPlan,
 	categoryProjectionItems,
 	planCategorySync,
+	targetedContainerIds,
 	type CategorySyncPlan,
 } from "./marvin/syncSelection";
 import {
@@ -85,6 +87,19 @@ import {
 	taskTitleComesFirst,
 	type TaskFormattingOptions,
 } from "./marvin/taskFormatting";
+import { createAsyncLock } from "./marvin/asyncLock";
+import { CouchChangesClient } from "./marvin/couchChanges";
+import { CouchBulkClient, CouchBulkSnapshotSource } from "./marvin/couchBulkSnapshot";
+import {
+	IncrementalMarvinCache,
+	IncrementalRetryBackoff,
+	type IncrementalUpdate,
+} from "./marvin/incrementalCache";
+import {
+	ObsidianIncrementalCacheStore,
+	createObsidianCouchTransport,
+	type IncrementalFileAdapter,
+} from "./marvin/obsidianIncremental";
 
 function getAMTimezoneOffset() {
 	return new Date().getTimezoneOffset() * -1;
@@ -122,6 +137,20 @@ export default class AmazingMarvinPlugin extends Plugin {
 	private readonly todayRefreshes = new Map<string, Promise<RefreshTodayTasksResult>>();
 	private lastAutomaticRefreshAt = 0;
 	private lastAutomaticRefreshError = "";
+	private incrementalCache?: IncrementalMarvinCache;
+	private incrementalCacheKey = "";
+	private readonly incrementalBackoff = new IncrementalRetryBackoff();
+	private incrementalSyncInFlight?: Promise<void>;
+	private lastAutomaticIncrementalAt = 0;
+	private lastIncrementalError = "";
+	private lastIncrementalSyncAt = 0;
+	// The REST full sync and the incremental targeted sync both mutate this
+	// shared `categories` field and use it for parent-link rendering.
+	// Incremental sync now runs automatically in the background (focus,
+	// interval, startup, online) — without this, it can interleave with a
+	// user-triggered REST import and corrupt category path computation.
+	private readonly categoriesLock = createAsyncLock();
+	private settingsTab?: AmazingMarvinSettingsTab;
 
 	readonly api: AmazingMarvinApi = {
 		getToday: (date) => this.getMarvinRouter().getTodayItems(date),
@@ -180,7 +209,8 @@ export default class AmazingMarvinPlugin extends Plugin {
 
 	private async initialize(): Promise<void> {
 		await this.loadSettings();
-		this.addSettingTab(new AmazingMarvinSettingsTab(this.app, this));
+		this.settingsTab = new AmazingMarvinSettingsTab(this.app, this);
+		this.addSettingTab(this.settingsTab);
 		if (this.settings.attemptToMarkTasksAsDone) {
 			this.registerEditorExtension(amTaskWatcher(this.app, this));
 		}
@@ -230,6 +260,32 @@ export default class AmazingMarvinPlugin extends Plugin {
 		}, 60_000));
 		this.app.workspace.onLayoutReady(() => {
 			void this.runAutomaticTodayRefresh("startup");
+		});
+
+		this.addCommand({
+			id: "incremental-sync-now",
+			name: "Sync Amazing Marvin now (incremental)",
+			callback: () => {
+				void this.runIncrementalSync("command").then(
+					() => new Notice("Amazing Marvin incremental sync complete."),
+					(error) => new Notice(
+						`Amazing Marvin incremental sync failed: ${this.errorMessage(error)}`,
+						10_000,
+					),
+				);
+			},
+		});
+		this.registerDomEvent(activeWindow, "focus", () => {
+			void this.runAutomaticIncrementalSync("window focus");
+		});
+		this.registerDomEvent(window, "online", () => {
+			void this.runAutomaticIncrementalSync("network recovery");
+		});
+		this.registerInterval(window.setInterval(() => {
+			void this.runAutomaticIncrementalSync("interval");
+		}, 60_000));
+		this.app.workspace.onLayoutReady(() => {
+			void this.runAutomaticIncrementalSync("startup");
 		});
 	}
 
@@ -606,6 +662,233 @@ export default class AmazingMarvinPlugin extends Plugin {
 		}
 	}
 
+	private buildObsidianFileAdapter(): IncrementalFileAdapter {
+		const adapter = this.app.vault.adapter;
+		return {
+			exists: (path) => adapter.exists(path),
+			read: (path) => adapter.read(path),
+			write: (path, data) => adapter.write(path, data),
+			async process(path, update) {
+				const next = update(await adapter.read(path));
+				await adapter.write(path, next);
+				return next;
+			},
+			remove: (path) => adapter.remove(path),
+		};
+	}
+
+	private getPluginDataDir(): string {
+		return normalizePath(
+			this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`,
+		);
+	}
+
+	private getOrCreateIncrementalCache(): IncrementalMarvinCache | undefined {
+		if (!this.settings.incrementalSyncEnabled) {
+			return undefined;
+		}
+		const { databaseUri, databaseUser, databasePassword } = this.settings;
+		if (!databaseUri.trim() || !databaseUser.trim() || !databasePassword) {
+			return undefined;
+		}
+		const key = JSON.stringify([databaseUri, databaseUser, databasePassword]);
+		if (this.incrementalCache && this.incrementalCacheKey === key) {
+			return this.incrementalCache;
+		}
+		const credentials = { databaseUri, databaseUser, databasePassword };
+		const transport = createObsidianCouchTransport(requestUrl);
+		this.incrementalCache = new IncrementalMarvinCache({
+			sourceKey: key,
+			changes: new CouchChangesClient(credentials, transport),
+			snapshot: new CouchBulkSnapshotSource(new CouchBulkClient(credentials, transport)),
+			store: new ObsidianIncrementalCacheStore(
+				this.buildObsidianFileAdapter(),
+				this.getPluginDataDir(),
+			),
+			// The library default (60s) exactly matches this plugin's own
+			// automatic "interval" trigger cadence, so a no-op poll would
+			// still cross the threshold almost every tick and rewrite the
+			// whole cache file anyway — the exact write amplification the
+			// default exists to prevent. Use a materially larger interval.
+			checkpointPersistIntervalMs: 5 * 60_000,
+		});
+		this.incrementalCacheKey = key;
+		// New credentials deserve a clean retry slate — otherwise a backoff
+		// delay earned by the OLD (possibly bad) credentials would still
+		// throttle automatic retries after the user fixes a typo, for up to
+		// this.incrementalBackoff's max delay (5 minutes).
+		this.incrementalBackoff.recordSuccess();
+		return this.incrementalCache;
+	}
+
+	private async runAutomaticIncrementalSync(reason: string): Promise<void> {
+		if (!this.settings.incrementalSyncEnabled) {
+			return;
+		}
+		const now = Date.now();
+		const minimumDelay = reason === "interval" ? 60_000 : 15_000;
+		if (now - this.lastAutomaticIncrementalAt < minimumDelay) {
+			return;
+		}
+		if (!this.incrementalBackoff.canRun()) {
+			return;
+		}
+		this.lastAutomaticIncrementalAt = now;
+		// Captured before the call: runIncrementalSync already overwrites
+		// lastIncrementalError with the new message on failure, so comparing
+		// against it afterward would always be comparing a value to itself.
+		const previousError = this.lastIncrementalError;
+		try {
+			await this.runIncrementalSync(reason);
+		} catch (error) {
+			const message = this.errorMessage(error);
+			console.warn(`Amazing Marvin incremental sync failed after ${reason}:`, error);
+			if (message !== previousError) {
+				new Notice(
+					`Amazing Marvin incremental sync failed; existing notes were left unchanged. ${message}`,
+					10_000,
+				);
+			}
+		}
+	}
+
+	/** Runs fn only after every previously queued categories-mutating
+	 * operation has settled, regardless of that operation's own success or
+	 * failure. Both the REST sync() and the incremental path's
+	 * applyIncrementalUpdate() go through this so they never interleave
+	 * writes to this.categories. */
+	private async withCategoriesLock<T>(fn: () => Promise<T>): Promise<T> {
+		return this.categoriesLock.run(fn);
+	}
+
+	/** Serializes concurrent triggers (focus + interval firing together, for
+	 * example) onto one in-flight sync rather than racing the same cache. */
+	async runIncrementalSync(trigger: string): Promise<void> {
+		if (this.incrementalSyncInFlight) {
+			return this.incrementalSyncInFlight;
+		}
+		const pending = this.runIncrementalSyncOnce(trigger).finally(() => {
+			this.incrementalSyncInFlight = undefined;
+		});
+		this.incrementalSyncInFlight = pending;
+		return pending;
+	}
+
+	private async runIncrementalSyncOnce(trigger: string): Promise<void> {
+		try {
+			const cache = this.getOrCreateIncrementalCache();
+			if (!cache) {
+				// Inside the try, not before it: a missing-credentials
+				// failure must still update lastIncrementalError and the
+				// backoff, exactly like any other failure — otherwise this
+				// specific error bypasses both, and the automatic-sync
+				// notice-dedup (which compares against lastIncrementalError)
+				// re-fires on every single trigger forever instead of once.
+				throw new Error(
+					"Incremental sync is disabled or missing database credentials.",
+				);
+			}
+			const update = await cache.sync();
+			this.incrementalBackoff.recordSuccess();
+			this.lastIncrementalError = "";
+			this.lastIncrementalSyncAt = Date.now();
+			await this.withCategoriesLock(() => this.applyIncrementalUpdate(cache, update));
+			await cache.acknowledgeProjection();
+		} catch (error) {
+			this.incrementalBackoff.recordFailure();
+			this.lastIncrementalError = this.errorMessage(error);
+			console.warn(`Amazing Marvin incremental sync failed (trigger: ${trigger}):`, error);
+			throw error;
+		} finally {
+			// Covers automatic (focus/interval/startup/online) syncs too,
+			// not just the manual "Sync now" button — otherwise the Status
+			// line in an already-open settings tab goes stale until the
+			// user does something to force a re-render.
+			this.settingsTab?.display();
+		}
+	}
+
+	/** Targeted reconciliation: only the categories/inbox the sync actually
+	 * touched are re-rendered, sourced from the cache — never a REST call —
+	 * so incremental sync never reintroduces the throttling it exists to
+	 * avoid. Respects the user's existing selective-import settings: an
+	 * unselected category's change is not suddenly imported. */
+	private async applyIncrementalUpdate(
+		cache: IncrementalMarvinCache,
+		update: IncrementalUpdate,
+	): Promise<void> {
+		const cachedCategories = cache.getCategories();
+		if (!cachedCategories) {
+			return;
+		}
+		this.categories = cachedCategories.map(
+			(item) => this.decorateWithDeepLink(item, "category"),
+		) as Category[];
+
+		const fullPlan = planCategorySync(
+			this.categories,
+			this.settings.syncSelectionMode,
+			this.settings.syncRoots.map((root) => root.id),
+		);
+		// fullRefresh means "the initial hydration snapshot" (or a previous
+		// sync's projection went unacknowledged) — affectedContainerIds only
+		// covers changes since the hydration checkpoint, not the snapshot
+		// itself. Without this, first enablement would hydrate the cache
+		// but never actually write a single note.
+		const targetedIds = update.fullRefresh
+			? new Set(fullPlan.includedIds)
+			: targetedContainerIds(update.affectedContainerIds, fullPlan);
+
+		if (targetedIds.size > 0) {
+			const existingFiles = await this.findManagedImportFiles();
+			const targetedPlan = buildTargetedPlan(targetedIds, fullPlan);
+			const preFetchedChildrenByCategoryId = new Map<string, (Task | Category)[]>();
+			for (const id of targetedPlan.contentIds) {
+				const children = cache.getChildren(id) ?? [];
+				preFetchedChildrenByCategoryId.set(
+					id,
+					children.map((item) => this.decorateWithDeepLink(item)),
+				);
+			}
+			await this.processCategories(existingFiles, targetedPlan, preFetchedChildrenByCategoryId);
+		}
+
+		if ((update.inboxChanged || update.fullRefresh) && this.settings.syncInbox) {
+			const existingFiles = await this.findManagedImportFiles();
+			const inboxItems = (cache.getChildren("unassigned") ?? []).map(
+				(item) => this.decorateWithDeepLink(item),
+			);
+			await this.processInbox(existingFiles, inboxItems);
+		}
+	}
+
+	getIncrementalSyncStatus(): { lastError?: string; lastSuccessfulSyncAt?: number } {
+		return {
+			...(this.lastIncrementalError ? { lastError: this.lastIncrementalError } : {}),
+			...(this.lastIncrementalSyncAt ? { lastSuccessfulSyncAt: this.lastIncrementalSyncAt } : {}),
+		};
+	}
+
+	/** Clears the persisted cache file directly, independent of whether
+	 * credentials are currently valid — a stale file left over from before
+	 * the user disabled incremental sync or cleared credentials must still
+	 * be clearable from settings, not stuck with no way to remove it. */
+	async resetIncrementalCache(): Promise<void> {
+		if (this.incrementalCache) {
+			await this.incrementalCache.clear();
+		} else {
+			await new ObsidianIncrementalCacheStore(
+				this.buildObsidianFileAdapter(),
+				this.getPluginDataDir(),
+			).clear();
+		}
+		this.incrementalCache = undefined;
+		this.incrementalCacheKey = "";
+		this.incrementalBackoff.recordSuccess();
+		this.lastIncrementalError = "";
+		this.lastIncrementalSyncAt = 0;
+	}
+
 	private async refreshManagedTodayIfPresent(): Promise<boolean> {
 		const date = moment().format("YYYY-MM-DD");
 		let file: TFile;
@@ -637,19 +920,21 @@ export default class AmazingMarvinPlugin extends Plugin {
 
 
 	async sync() {
-		await this.refreshLabelsForProjection();
-		const categories = await this.getCategories();
-		this.categories = categories;
-		const plan = planCategorySync(
-			categories,
-			this.settings.syncSelectionMode,
-			this.settings.syncRoots.map((root) => root.id),
-		);
-		const existingFiles = await this.findManagedImportFiles();
-		await this.processCategories(existingFiles, plan);
-		if (this.settings.syncInbox) {
-			await this.processInbox(existingFiles);
-		}
+		return this.withCategoriesLock(async () => {
+			await this.refreshLabelsForProjection();
+			const categories = await this.getCategories();
+			this.categories = categories;
+			const plan = planCategorySync(
+				categories,
+				this.settings.syncSelectionMode,
+				this.settings.syncRoots.map((root) => root.id),
+			);
+			const existingFiles = await this.findManagedImportFiles();
+			await this.processCategories(existingFiles, plan);
+			if (this.settings.syncInbox) {
+				await this.processInbox(existingFiles);
+			}
+		});
 	}
 
 	async getCategories(): Promise<Category[]> {
@@ -688,8 +973,11 @@ export default class AmazingMarvinPlugin extends Plugin {
 		} as Task | Category;
 	}
 
-	async processInbox(existingFiles: Map<string, TFile>) {
-		const inboxItems = await this.getChildren("unassigned");
+	async processInbox(
+		existingFiles: Map<string, TFile>,
+		preFetchedItems?: (Task | Category)[],
+	) {
+		const inboxItems = preFetchedItems ?? await this.getChildren("unassigned");
 		const content = this.formatItems(inboxItems);
 		const inboxFilePath = normalizePath(`${this.getSyncBaseDir()}/Inbox.md`);
 		await this.moveManagedFile(existingFiles.get("unassigned"), inboxFilePath);
@@ -758,6 +1046,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 	async processCategories(
 		existingFiles: Map<string, TFile>,
 		plan: CategorySyncPlan,
+		preFetchedChildrenByCategoryId?: Map<string, (Task | Category)[]>,
 	) {
 		for (const category of this.categories.filter(
 			(item) => plan.includedIds.has(item._id),
@@ -767,6 +1056,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 			const content = await this.createContentForCategory(
 				category,
 				plan,
+				preFetchedChildrenByCategoryId?.get(category._id),
 			);
 			await this.createOrUpdateManaged(
 				path,
@@ -876,6 +1166,11 @@ export default class AmazingMarvinPlugin extends Plugin {
 	async createContentForCategory(
 		category: Category,
 		plan: CategorySyncPlan,
+		// When supplied, skips the REST children fetch — the incremental
+		// sync path already has this category's children from its cache,
+		// and re-fetching via REST here would reintroduce the same N+1
+		// throttling exposure incremental sync exists to avoid.
+		preFetchedChildren?: (Task | Category)[],
 	): Promise<string> {
 		const labelTags = this.settings.showMarvinLabelsAsTags
 			? formatMarvinLabelTags(
@@ -897,9 +1192,11 @@ export default class AmazingMarvinPlugin extends Plugin {
 			}
 		}
 		// Fetch and format tasks
-		const fetchedChildren = plan.contentIds.has(category._id)
-			? await this.getChildren(category._id)
-			: undefined;
+		const fetchedChildren = preFetchedChildren ?? (
+			plan.contentIds.has(category._id)
+				? await this.getChildren(category._id)
+				: undefined
+		);
 		const children = categoryProjectionItems(
 			category._id,
 			plan,

@@ -319,6 +319,17 @@ local-first reads through the Amazing Marvin desktop API. The optional
 `AMAZING_MARVIN_LOCAL_API_URL` and `AMAZING_MARVIN_PUBLIC_API_URL` override
 their endpoints.
 
+If the Obsidian plugin's experimental incremental sync (below) is enabled
+for the same Amazing Marvin account, point the MCP server at the same
+persisted cache file with `AMAZING_MARVIN_INCREMENTAL_CACHE_PATH` (the
+plugin's data directory, `marvin-incremental-cache-v1.json`) so
+`marvin_categories`/`marvin_children` read from it instead of a REST round
+trip when it's fresh enough. This is read-only and best-effort: the MCP
+server never needs the database credentials, and it falls back to REST on
+any failure — missing file, unparseable, or older than
+`AMAZING_MARVIN_INCREMENTAL_CACHE_MAX_AGE_MS` (default 10 minutes). Leave
+it unset for the existing REST-only behavior.
+
 ### Tool workflow
 
 | Tool | Use it for |

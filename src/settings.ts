@@ -39,6 +39,10 @@ export interface AmazingMarvinPluginSettings {
 	syncSelectionMode: SyncSelectionMode;
 	syncRoots: SyncRootSelection[];
 	syncInbox: boolean;
+	incrementalSyncEnabled: boolean;
+	databaseUri: string;
+	databaseUser: string;
+	databasePassword: string;
 }
 
 export const DEFAULT_SETTINGS: AmazingMarvinPluginSettings = {
@@ -65,6 +69,10 @@ export const DEFAULT_SETTINGS: AmazingMarvinPluginSettings = {
 	syncRoots: [],
 	syncInbox: true,
 	attemptToMarkTasksAsDone: false,
+	incrementalSyncEnabled: false,
+	databaseUri: "",
+	databaseUser: "",
+	databasePassword: "",
 };
 
 class SyncRootSuggestModal extends FuzzySuggestModal<Category> {
@@ -265,6 +273,116 @@ private a(href: string, text: string) {
 					await this.plugin.saveSettings();
 				})
 			);
+
+		new Setting(containerEl)
+			.setHeading().setName("Experimental incremental sync");
+
+		const incrementalDescEl = createFragment();
+		incrementalDescEl.appendText(
+			"Amazing Marvin's request API throttles heavily enough that we confirmed it directly "
+			+ "with their support — this remained true even when routing through the local desktop "
+			+ "API. Enabling this trades a bigger credential (full database access, not the limited "
+			+ "API token above) for avoiding that throttling entirely during ongoing sync. The limited "
+			+ "token remains the default and fallback; this is opt-in and off by default.",
+		);
+		const incrementalHeading = new Setting(containerEl);
+		incrementalHeading.descEl.appendChild(incrementalDescEl);
+
+		new Setting(containerEl)
+			.setName("Enable incremental sync")
+			.setDesc("Requires separate database credentials from Amazing Marvin's API settings page, not the limited API token.")
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.incrementalSyncEnabled)
+				.onChange(async (value) => {
+					this.plugin.settings.incrementalSyncEnabled = value;
+					await this.plugin.saveSettings();
+					this.display();
+				})
+			);
+
+		if (this.plugin.settings.incrementalSyncEnabled) {
+			new Setting(containerEl)
+				.setName("Database URI")
+				.setDesc("Full HTTPS database URI from Amazing Marvin's API settings. Credentials embedded in the URI are rejected — use the fields below.")
+				.addText(text => text
+					.setPlaceholder("https://.../database")
+					.setValue(this.plugin.settings.databaseUri)
+					.onChange(async (value) => {
+						this.plugin.settings.databaseUri = value.trim();
+						await this.plugin.saveSettings();
+					})
+				);
+
+			new Setting(containerEl)
+				.setName("Database user")
+				.addText(text => text
+					.setValue(this.plugin.settings.databaseUser)
+					.onChange(async (value) => {
+						this.plugin.settings.databaseUser = value.trim();
+						await this.plugin.saveSettings();
+					})
+				);
+
+			new Setting(containerEl)
+				.setName("Database password")
+				.setDesc("Stored locally in this plugin's Obsidian settings. Treat it as highly sensitive — it grants full read access to your Amazing Marvin database, not just the limited API surface.")
+				.addText(text => {
+					text.inputEl.type = "password";
+					text
+						.setValue(this.plugin.settings.databasePassword)
+						.onChange(async (value) => {
+							this.plugin.settings.databasePassword = value;
+							await this.plugin.saveSettings();
+						});
+				});
+
+			new Setting(containerEl)
+				.setName("Sync now")
+				.setDesc("Manually trigger an incremental sync using the credentials above.")
+				.addButton(button => button
+					.setButtonText("Sync now")
+					.onClick(async () => {
+						try {
+							await this.plugin.runIncrementalSync("manual");
+							new Notice("Amazing Marvin incremental sync complete.");
+						} catch (error) {
+							console.error("Amazing Marvin incremental sync failed:", error);
+							new Notice(`Amazing Marvin incremental sync failed: ${error instanceof Error ? error.message : String(error)}`);
+						}
+						// Otherwise the Status line below stays stale (still
+						// "Not yet synced" or a prior error) until the user
+						// closes and reopens the settings tab.
+						this.display();
+					})
+				);
+		}
+
+		// Deliberately outside the enabled-only block: a stale cache file
+		// from before the user disabled incremental sync (or cleared
+		// credentials) must still be clearable. resetIncrementalCache() is
+		// a safe no-op when there's nothing to clear, and in-memory status
+		// (unlike the on-disk file) doesn't survive an Obsidian restart, so
+		// there's no reliable signal to gate this on beyond "always show it."
+		{
+			const status = this.plugin.getIncrementalSyncStatus();
+			new Setting(containerEl)
+				.setName("Incremental sync status")
+				.setDesc(
+					status.lastError
+						? `Last error: ${status.lastError}`
+						: status.lastSuccessfulSyncAt
+							? `Last synced: ${new Date(status.lastSuccessfulSyncAt).toLocaleString()}`
+							: "Not yet synced.",
+				)
+				.addButton(button => button
+					.setButtonText("Reset cache")
+					.onClick(async () => {
+						await this.plugin.resetIncrementalCache();
+						new Notice("Amazing Marvin incremental cache reset. The next sync will re-hydrate from scratch.");
+						this.display();
+					})
+				);
+		}
 
 		new Setting(containerEl)
 			.setHeading().setName("Today Tasks");
