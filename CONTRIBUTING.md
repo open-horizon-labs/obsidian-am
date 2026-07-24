@@ -43,6 +43,12 @@ Maintainers cut releases from a clean `master` checkout:
   a `beta/<version>` PR. Merging it automatically tags, builds, and publishes
   the beta release (via `.github/workflows/release.yml`).
 
+  To ship real release notes instead of the generic fallback message, add a
+  `BETA_RELEASE_NOTES.md` at the repo root (on the `beta/<version>` branch,
+  alongside the version bump commit) before merging — outcome, how to test,
+  and where to send feedback. It's picked up automatically and is meant to
+  be removed once used, not kept as a standing changelog.
+
 ### Beta version numbers are one-way
 
 Obsidian's stock "Check for updates" does not support the full semver spec -
