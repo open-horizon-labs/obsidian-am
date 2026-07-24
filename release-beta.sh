@@ -8,7 +8,7 @@ if [ "$#" -ne 2 ]; then
     echo "Second one must be the minimum obsidian version for this release."
     echo ""
     echo "Example usage:"
-    echo "./release-beta.sh 0.3.0 0.11.13"
+    echo "./release-beta.sh 0.11.0-beta1 1.12.7"
     echo "Exiting."
 
     exit 1
@@ -23,6 +23,7 @@ fi
 
 NEW_VERSION=$1
 MINIMUM_OBSIDIAN_VERSION=$2
+BRANCH_NAME="beta/${NEW_VERSION}"
 
 echo "Updating to version ${NEW_VERSION} with minimum obsidian version ${MINIMUM_OBSIDIAN_VERSION}"
 
@@ -30,6 +31,9 @@ read -p "Continue? [y/N] " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]
 then
+  echo "Creating branch ${BRANCH_NAME}"
+  git checkout -b "${BRANCH_NAME}"
+
   echo "Updating package.json"
   TEMP_FILE=$(mktemp)
   jq ".version |= \"${NEW_VERSION}\"" package.json > "$TEMP_FILE" || exit 1
@@ -45,16 +49,27 @@ then
   jq ". += {\"${NEW_VERSION}\": \"${MINIMUM_OBSIDIAN_VERSION}\"}" versions.json > "$TEMP_FILE" || exit 1
   mv "$TEMP_FILE" versions.json
 
-  read -p "Create git commit, tag, and push? [y/N] " -n 1 -r
+  echo "Updating package-lock.json"
+  npm install
+
+  read -p "Create git commit, push, and open a pull request? [y/N] " -n 1 -r
   echo
   if [[ $REPLY =~ ^[Yy]$ ]]
   then
+    git add package.json package-lock.json manifest-beta.json versions.json
+    git commit -m "Update to version ${NEW_VERSION}"
+    git push --set-upstream origin "${BRANCH_NAME}"
 
-    git add -A .
-    git commit -m"Update to version ${NEW_VERSION}"
-    git tag "${NEW_VERSION}"
-    git push
-    git push --tags
+    echo "Creating a pull request..."
+    gh pr create \
+      --title "Update to version ${NEW_VERSION}" \
+      --body "Beta version bump to ${NEW_VERSION} (minimum Obsidian version ${MINIMUM_OBSIDIAN_VERSION})." \
+      --base master \
+      --head "${BRANCH_NAME}"
+
+    echo ""
+    echo "Pull request created. Merging it into master will automatically tag,"
+    echo "build, and publish the ${NEW_VERSION} beta release (via .github/workflows/release.yml)."
   fi
 else
   echo "Exiting."
