@@ -106,7 +106,7 @@ const animateNotice = (notice: Notice) => {
 		message = message.replace(" ...", "    ");
 	}
 	notice.setMessage(message);
-	activeWindow.setTimeout(() => animateNotice(notice), 500);
+	window.setTimeout(() => animateNotice(notice), 500);
 };
 
 export default class AmazingMarvinPlugin extends Plugin {
@@ -225,7 +225,7 @@ export default class AmazingMarvinPlugin extends Plugin {
 		this.registerDomEvent(activeWindow, "focus", () => {
 			void this.runAutomaticTodayRefresh("window focus");
 		});
-		this.registerInterval(activeWindow.setInterval(() => {
+		this.registerInterval(window.setInterval(() => {
 			void this.runAutomaticTodayRefresh("interval");
 		}, 60_000));
 		this.app.workspace.onLayoutReady(() => {
