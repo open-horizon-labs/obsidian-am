@@ -9,6 +9,13 @@ if [ "$#" -ne 2 ]; then
     echo ""
     echo "Example usage:"
     echo "./release-beta.sh 0.11.0-beta1 1.12.7"
+    echo ""
+    echo "IMPORTANT: once X.Y.Z-betaN ships, X.Y.Z is burned - Obsidian's"
+    echo "stock update checker cannot compare pre-release suffixes, so a"
+    echo "later stable release reusing that exact base version will never"
+    echo "reach users who installed the beta. The real stable release must"
+    echo "ship higher than X.Y.Z (bump at least the patch). See"
+    echo "CONTRIBUTING.md for details."
     echo "Exiting."
 
     exit 1
