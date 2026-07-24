@@ -1,0 +1,140 @@
+[
+  {
+    "label": "create-task",
+    "record": {
+      "seq": "1996-g1AAAACReJzLYWBgYMpgTmHgzcvPy09JdcjLz8gvLskBCScyJNX___8_K4M5iYGB-W0uUIzdOCnN0izVBF09DhPyWIAkQwOQ-o8w6D7YoCTjJEtzA3N0bVkAW6UsXw",
+      "id": "synth-task-1",
+      "changes": [
+        {
+          "rev": "1-62f92661c4ef43d14565e950331201b5"
+        }
+      ],
+      "doc": {
+        "_id": "synth-task-1",
+        "_rev": "1-62f92661c4ef43d14565e950331201b5",
+        "db": "Tasks",
+        "title": "Synthetic task",
+        "parentId": "root",
+        "done": false
+      }
+    }
+  },
+  {
+    "label": "rename-task",
+    "record": {
+      "seq": "1997-g1AAAACReJzLYWBgYMpgTmHgzcvPy09JdcjLz8gvLskBCScyJNX___8_K4M5iYGB-V0uUIzdOCnN0izVBF09DhPyWIAkQwOQ-o8w6D7YoCTjJEtzA3N0bVkAXAwsYA",
+      "id": "synth-task-1",
+      "changes": [
+        {
+          "rev": "2-18632708e7fe8ed430080245a2a56ec1"
+        }
+      ],
+      "doc": {
+        "_id": "synth-task-1",
+        "_rev": "2-18632708e7fe8ed430080245a2a56ec1",
+        "db": "Tasks",
+        "title": "Synthetic task (renamed)",
+        "parentId": "root",
+        "done": false
+      }
+    }
+  },
+  {
+    "label": "complete-task",
+    "record": {
+      "seq": "1998-g1AAAACReJzLYWBgYMpgTmHgzcvPy09JdcjLz8gvLskBCScyJNX___8_K4M5iYGB-X0uUIzdOCnN0izVBF09DhPyWIAkQwOQ-o8w6D7YoCTjJEtzA3N0bVkAXHMsYQ",
+      "id": "synth-task-1",
+      "changes": [
+        {
+          "rev": "3-4a057309c8f3b4dc14fef5d0bc56246a"
+        }
+      ],
+      "doc": {
+        "_id": "synth-task-1",
+        "_rev": "3-4a057309c8f3b4dc14fef5d0bc56246a",
+        "db": "Tasks",
+        "title": "Synthetic task (renamed)",
+        "parentId": "root",
+        "done": true,
+        "doneAt": 1
+      }
+    }
+  },
+  {
+    "label": "create-category",
+    "record": {
+      "seq": "1999-g1AAAACReJzLYWBgYMpgTmHgzcvPy09JdcjLz8gvLskBCScyJNX___8_K4M5iYGB-UMuUIzdOCnN0izVBF09DhPyWIAkQwOQ-o8w6D7YoCTjJEtzA3N0bVkAXNosYg",
+      "id": "synth-category-1",
+      "changes": [
+        {
+          "rev": "1-724f78e91fdf4ba4921476c78ab4b4e0"
+        }
+      ],
+      "doc": {
+        "_id": "synth-category-1",
+        "_rev": "1-724f78e91fdf4ba4921476c78ab4b4e0",
+        "db": "Categories",
+        "type": "category",
+        "title": "Synthetic category",
+        "parentId": "root"
+      }
+    }
+  },
+  {
+    "label": "move-task",
+    "record": {
+      "seq": "2000-g1AAAACReJzLYWBgYMpgTmHgzcvPy09JdcjLz8gvLskBCScyJNX___8_K4M5iYGB-WMuUIzdOCnN0izVBF09DhPyWIAkQwOQ-o8w6D7YoCTjJEtzA3N0bVkAXUEsYw",
+      "id": "synth-task-1",
+      "changes": [
+        {
+          "rev": "4-91abe9fdddb9d8a9882d6c17f197aac3"
+        }
+      ],
+      "doc": {
+        "_id": "synth-task-1",
+        "_rev": "4-91abe9fdddb9d8a9882d6c17f197aac3",
+        "db": "Tasks",
+        "title": "Synthetic task (renamed)",
+        "parentId": "synth-category-1",
+        "done": true,
+        "doneAt": 1
+      }
+    }
+  },
+  {
+    "label": "delete-task",
+    "record": {
+      "seq": "2001-g1AAAACReJzLYWBgYMpgTmHgzcvPy09JdcjLz8gvLskBCScyJNX___8_K4M5iYGB-VMuUIzdOCnN0izVBF09DhPyWIAkQwOQ-o8w6D7YoCTjJEtzA3N0bVkAXagsZA",
+      "id": "synth-task-1",
+      "changes": [
+        {
+          "rev": "5-36572a16bc620a1f588cdf8c287e5e77"
+        }
+      ],
+      "deleted": true,
+      "doc": {
+        "_id": "synth-task-1",
+        "_rev": "5-36572a16bc620a1f588cdf8c287e5e77",
+        "_deleted": true
+      }
+    }
+  },
+  {
+    "label": "delete-category",
+    "record": {
+      "seq": "2002-g1AAAACReJzLYWBgYMpgTmHgzcvPy09JdcjLz8gvLskBCScyJNX___8_K4M5iYGB-XMuUIzdOCnN0izVBF09DhPyWIAkQwOQ-o8w6D7YoCTjJEtzA3N0bVkAXg8sZQ",
+      "id": "synth-category-1",
+      "changes": [
+        {
+          "rev": "2-1b38a99465292b16bfab58cefc86dea4"
+        }
+      ],
+      "deleted": true,
+      "doc": {
+        "_id": "synth-category-1",
+        "_rev": "2-1b38a99465292b16bfab58cefc86dea4",
+        "_deleted": true
+      }
+    }
+  }
+]

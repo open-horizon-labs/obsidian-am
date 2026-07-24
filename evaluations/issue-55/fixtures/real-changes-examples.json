@@ -1,0 +1,126 @@
+[
+  {
+    "label": "create-task-via-rest-addTask",
+    "record": {
+      "seq": "50718-g1AAAAgTeJy9lD9OwzAUhy2KxMC_LswgsSElje3EaRbaG8ANwM9OVFVtg2g7w8gGN4CVCXYGEBMbSBwAxAXgBsWxrUYwNanSxZEi-X2fn39-PYRQvVOTaE-CSE_jtgRMXeg7QjjjoTNMx6OOgyNX9NKx5IORO4hHPbVniSPYnEwm3U4NEFrb76t_KzwStAm8ULEybKirFban-NVnjfeYwIn0q8fvZPhGfvpdjWcyJMDj6vFehm_l-KHGExElAM158GwmfDvDH0zx6y1z9wkFwHGheqXwhxn-KL_7LY2ngvlxuAD8cYZPc3yg8UmAGaFR9fiTDH-WN__CnJ6AT3kyB554s-AHy2pF5-qjDC5tBxpaIcbCiygpVLO8wpVRuLZdeDERDCmWfzNQocKNUbizXbg1OcA-sAQvSOHeKDzaOcBsFmikXv48Cv7sCk9G4dUqvGsFVUHwSBaqWV7hzSh8WIUvrRASGiSMLkjh0yh82yw8mIEckhj-vYjqFH6Mgp0LG9goBCqLTShUs_sLYUqJgQ",
+      "id": "1c670a36c6cc79e9fd2b2d261701c8ff",
+      "changes": [
+        {
+          "rev": "1-a6bf7e601ac2d6e35e0e9a00836200bf"
+        }
+      ],
+      "doc": {
+        "_id": "1c670a36c6cc79e9fd2b2d261701c8ff",
+        "_rev": "1-a6bf7e601ac2d6e35e0e9a00836200bf",
+        "db": "Tasks",
+        "done": false,
+        "doneAt": 0,
+        "createdAt": 1784856919660,
+        "title": "ZZZ-fixture-test — safe to delete",
+        "taskTime": "",
+        "parentId": "unassigned",
+        "labelIds": [],
+        "day": "unassigned",
+        "firstScheduled": "unassigned",
+        "masterRank": 0,
+        "rank": 0,
+        "dailySection": "",
+        "bonusSection": "",
+        "customSection": "",
+        "timeBlockSection": "",
+        "note": "",
+        "email": "",
+        "duration": 0,
+        "dueDate": "",
+        "timeEstimate": 0,
+        "backburner": false,
+        "isReward": false,
+        "isStarred": 0,
+        "isFrogged": 0,
+        "plannedWeek": "",
+        "plannedMonth": "",
+        "reviewDate": "",
+        "recurringTaskId": "",
+        "echo": false,
+        "echoId": "",
+        "isPinned": false,
+        "pinId": "",
+        "timeZoneOffset": 0,
+        "times": null,
+        "rewardPoints": 0
+      }
+    }
+  },
+  {
+    "label": "complete-task-via-rest-markDone",
+    "record": {
+      "seq": "50738-g1AAAAgTeJy9lLtOwzAUhi2KxMCtIxtIbEhpfUnsZIEO7PAGEF-iqmobRNsZHgAJ3gBWJtgZQGJhA54AxAvAGxTHtpq1SZUsjmQp5_v8-_j0AQDNbkOCPclFeq46kiO_xQeeEN5k5I3Sybjroagl-ulExsNxa6jGff3PUgz45nQ67XUbHIC1_YHeW1E0kDFEhYqVYfOmXvn2DL_6avARwSEOYPX4nQzfzk-_a_CcEkxYUD0eZviDHD8yeJok0JdkETybC9_J8Ecz_PqhwQc4pj6hheqVwh9n-JP87rcMXt87QgGrHn-a4dMcbzufEx6SBFePP8vwF3n4VwYvFUFcLRI-RvPgh8t6BZf6ow2uXQJt-_ZDiAhkhWqWV7ixCrcuhTejEOMY81DVpHBnFR5cCve2DbFgiPGaFB6twrObA9QoMKkQjBZKAc-v8GIV3p3Cp5uEAYsUK1SzvMKHVfhyCj9GwZc-EVTUpPBtFX5dLzwZBZH4MsJJTQp_VsHNhQ1kFBLCVCx4oZq9f0qkiFo",
+      "id": "1c670a36c6cc79e9fd2b2d261701c8ff",
+      "changes": [
+        {
+          "rev": "2-860e1fd3cfe23044438a8fb1c4963a70"
+        }
+      ],
+      "doc": {
+        "_id": "1c670a36c6cc79e9fd2b2d261701c8ff",
+        "_rev": "2-860e1fd3cfe23044438a8fb1c4963a70",
+        "db": "Tasks",
+        "done": true,
+        "doneAt": 1784856957892,
+        "createdAt": 1784856919660,
+        "title": "ZZZ-fixture-test — safe to delete",
+        "taskTime": "",
+        "parentId": "unassigned",
+        "labelIds": [],
+        "day": "2026-07-24",
+        "firstScheduled": "unassigned",
+        "masterRank": 0,
+        "rank": 0,
+        "dailySection": "",
+        "bonusSection": "",
+        "customSection": "",
+        "timeBlockSection": "",
+        "note": "",
+        "email": "",
+        "duration": 0,
+        "dueDate": "",
+        "timeEstimate": 0,
+        "backburner": false,
+        "isReward": false,
+        "isStarred": 0,
+        "isFrogged": 0,
+        "plannedWeek": "",
+        "plannedMonth": "",
+        "reviewDate": "",
+        "recurringTaskId": "",
+        "echo": false,
+        "echoId": "",
+        "isPinned": false,
+        "pinId": "",
+        "timeZoneOffset": 0,
+        "times": null,
+        "rewardPoints": 0
+      }
+    }
+  },
+  {
+    "label": "delete-task-via-app-ui",
+    "record": {
+      "seq": "50739-g1AAAAgTeJy9lLtOwzAUhi2KxMCtIxtIbEhpfUnsZIEuzPAGEF-iqmobRNsZHgAJ3gBWJtgZQGJhA54AxAvAGxTHtpq1SZUsjmQp5_v8-_j0AQDNbkOCPclFeq46kiO_xQeeEN5k5I3Sybjroagl-ulExsNxa6jGff3PUgz45nQ67XUbHIC1_YHeW1E0kDFEhYqVYfOmXvn2DL_6avARwSEOYPX4nQzfzk-_a_CcEkxYUD0eZviDHD8yeJok0JdkETybC9_J8Ecz_PqhwQc4pj6hheqVwh9n-JP87rcMXt87QgGrHn-a4dMcbzufEx6SBFePP8vwF3n4VwYvFUFcLRI-RvPgh8t6BZf6ow2uXQJt-_ZDiAhkhWqWV7ixCrcuhTejEOMY81DVpHBnFR5cCve2DbFgiPGaFB6twrObA9QoMKkQjBZKAc-v8GIV3p3Cp5uEAYsUK1SzvMKHVfhyCj9GwZc-EVTUpPBtFX5dLzwZBZH4MsJJTQp_VsHNhQ1kFBLCVCx4oZq9f1B0iFs",
+      "id": "1c670a36c6cc79e9fd2b2d261701c8ff",
+      "changes": [
+        {
+          "rev": "3-d2696e363dae493d4efcc7a403e84566"
+        }
+      ],
+      "deleted": true,
+      "doc": {
+        "_id": "1c670a36c6cc79e9fd2b2d261701c8ff",
+        "_rev": "3-d2696e363dae493d4efcc7a403e84566",
+        "db": "Tasks",
+        "D": 1,
+        "_deleted": true
+      }
+    }
+  }
+]
