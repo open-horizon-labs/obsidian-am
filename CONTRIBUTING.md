@@ -34,6 +34,29 @@ generated `dist/` output.
 
 ## Release
 
-Maintainers use `./release.sh <plugin-version> <minimum-obsidian-version>`
-from a clean `master` checkout. The tag workflow builds the plugin and creates
-a GitHub release; verify its assets and notes before publishing it.
+Maintainers cut releases from a clean `master` checkout:
+
+- Stable: `./release.sh <plugin-version> <minimum-obsidian-version>`. The tag
+  workflow builds the plugin and creates a GitHub release; verify its assets
+  and notes before publishing it.
+- Beta: `./release-beta.sh <plugin-version> <minimum-obsidian-version>` opens
+  a `beta/<version>` PR. Merging it automatically tags, builds, and publishes
+  the beta release (via `.github/workflows/release.yml`).
+
+### Beta version numbers are one-way
+
+Obsidian's stock "Check for updates" does not support the full semver spec -
+it only compares plain `number.number.number` versions and does not
+understand pre-release suffixes at all. If a user installs `X.Y.Z-betaN` (via
+BRAT) and you later publish the real `X.Y.Z` stable release, Obsidian's
+updater will not offer it - the user is stuck reporting "up to date" forever,
+with no path back to the stable channel short of a manual reinstall.
+
+**Once any `X.Y.Z-betaN` has shipped, `X.Y.Z` is burned.** The real stable
+release for that work must ship as a version *higher* than `X.Y.Z` - bump at
+least the patch, and prefer a minor bump for a safer margin. Never reuse the
+exact base version the betas were numbered against.
+
+See [obsidian42-brat's developer guide](https://github.com/TfTHacker/obsidian42-brat/blob/main/BRAT-DEVELOPER-GUIDE.md)
+and this [forum thread](https://forum.obsidian.md/t/functional-update-to-brat-version-picker-github-pre-releases-and-frozen-version-updates/98951)
+for the underlying mechanics.
