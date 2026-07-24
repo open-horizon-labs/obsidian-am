@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	buildTargetedPlan,
 	categoryProjectionItems,
 	planCategorySync,
+	targetedContainerIds,
 } from "./syncSelection";
 
 const categories = [
@@ -83,5 +85,56 @@ describe("category sync selection", () => {
 			categories,
 			selectedChildren,
 		).map((item) => item._id)).toEqual(["chapter", "draft"]);
+	});
+});
+
+describe("targeted incremental reconciliation", () => {
+	it("includes structural ancestors of a selected root, excludes unselected siblings", () => {
+		const plan = planCategorySync(categories, "selected", ["project"]);
+
+		// "work"/"knowledge" are structural ancestors of the selected root
+		// ("project") — they get a navigation-only note, so an incremental
+		// change to them is legitimately in scope. "garden" is an unselected
+		// sibling and must stay excluded, same as the REST importer already
+		// enforces (see categoryProjectionItems's own ancestor test above).
+		const targeted = targetedContainerIds(
+			["chapter", "work", "knowledge", "garden", "does-not-exist"],
+			plan,
+		);
+
+		expect(targeted).toEqual(new Set(["chapter", "work", "knowledge"]));
+	});
+
+	it("targets everything affected when the user has selected all categories", () => {
+		const plan = planCategorySync(categories, "all", []);
+		const targeted = targetedContainerIds(["work", "chapter", "garden"], plan);
+		expect(targeted).toEqual(new Set(["work", "chapter", "garden"]));
+	});
+
+	it("excludes an unselected sibling even when it's the only thing that changed", () => {
+		const plan = planCategorySync(categories, "selected", ["project"]);
+		expect(targetedContainerIds(["garden"], plan)).toEqual(new Set());
+	});
+});
+
+describe("buildTargetedPlan", () => {
+	it("keeps a targeted structural ancestor structure-only, not full content", () => {
+		const fullPlan = planCategorySync(categories, "selected", ["project"]);
+		// "work" is a structural ancestor of the selected root ("project"),
+		// not a real content id — a targeted refresh must preserve that.
+		const targeted = buildTargetedPlan(new Set(["work", "chapter"]), fullPlan);
+
+		expect(targeted.contentIds.has("work")).toBe(false);
+		expect(targeted.contentIds.has("chapter")).toBe(true);
+		expect(targeted.structuralIds.has("work")).toBe(true);
+		expect(targeted.includedIds).toEqual(new Set(["work", "chapter"]));
+	});
+
+	it("matches the full plan's content/structural split for a full refresh", () => {
+		const fullPlan = planCategorySync(categories, "selected", ["project"]);
+		const targeted = buildTargetedPlan(fullPlan.includedIds, fullPlan);
+
+		expect(targeted.contentIds).toEqual(fullPlan.contentIds);
+		expect(targeted.structuralIds).toEqual(fullPlan.structuralIds);
 	});
 });
