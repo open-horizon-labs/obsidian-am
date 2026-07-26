@@ -379,6 +379,24 @@ would. Repeated calls don't stack up waiting on a plugin that isn't
 answering — an unclaimed request file is treated as evidence that nothing is
 listening, and the next call skips the wait until the plugin picks up again.
 
+Because that means `refresh: true` can succeed, time out, or decline to try,
+a read that requested one carries a `refresh` object saying which happened:
+
+```json
+"refresh": { "requested": true, "outcome": "synced", "waitedMs": 820 }
+```
+
+`outcome` is `synced` when the plugin's checkpoint advanced, `timed_out` when
+the request was written but no sync was observed inside the window, or
+`skipped` when nothing was attempted — with a `reason` explaining why, such as
+no cache being configured or an earlier request still sitting unclaimed. The
+surrounding `freshness`/`origin` fields still describe where the answer came
+from; this describes what the refresh did. The object is absent entirely when
+`refresh` wasn't requested.
+
+Incremental sync is desktop-only on the plugin side, so `refresh: true` will
+report `timed_out` or `skipped` when the vault it points at is open on mobile.
+
 ### Tool workflow
 
 | Tool | Use it for |

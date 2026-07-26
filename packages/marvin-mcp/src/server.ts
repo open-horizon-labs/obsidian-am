@@ -9,7 +9,10 @@ import {
 	MarvinRouter,
 } from "@open-horizon/marvin-client";
 import { createCachePreferringOperations } from "./incrementalCacheOperations.js";
-import { createCacheRefreshRequester } from "./incrementalRefresh.js";
+import {
+	createCacheRefreshRequester,
+	type CacheRefreshResult,
+} from "./incrementalRefresh.js";
 import { createMarvinMcpServer, type MarvinOperations } from "./tools.js";
 
 export interface MarvinMcpEnvironment {
@@ -81,7 +84,7 @@ export function createOperationsFromEnvironment(
  * parameter stays an accepted no-op. */
 export function createRefreshRequesterFromEnvironment(
 	environment: MarvinMcpEnvironment = process.env,
-): (() => Promise<void>) | undefined {
+): (() => Promise<CacheRefreshResult>) | undefined {
 	const cachePath = environment.AMAZING_MARVIN_INCREMENTAL_CACHE_PATH?.trim();
 	if (!cachePath) {
 		return undefined;
