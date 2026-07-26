@@ -183,3 +183,100 @@ describe("refreshTodayRegion", () => {
 		expect(result.lateIds).toEqual([]);
 	});
 });
+
+describe("preserving completed Today tasks", () => {
+	const date = "2026-07-26";
+	const open = (id: string, title: string) => ({
+		id,
+		title,
+		done: false,
+		deepLink: `https://app.amazingmarvin.com/#t=${id}`,
+	});
+
+	function firstPass(items: ReturnType<typeof open>[]) {
+		return refreshTodayRegion("", { date, items }).content;
+	}
+
+	it("keeps a completed task in place after Marvin stops returning it", () => {
+		// Marvin's Today/due reads only return open work, so a checked task
+		// vanishes from the read entirely. It must not vanish from the note.
+		const morning = firstPass([open("a", "First"), open("b", "Second"), open("c", "Third")]);
+		const checked = morning.replace(
+			"- [ ] Second [⚓](https://app.amazingmarvin.com/#t=b)",
+			"- [x] Second [⚓](https://app.amazingmarvin.com/#t=b)",
+		);
+		expect(checked).toContain("- [x] Second");
+
+		const after = refreshTodayRegion(checked, {
+			date,
+			items: [open("a", "First"), open("c", "Third")],
+		});
+
+		expect(after.content).toContain("- [x] Second");
+		// In place: still between First and Third, not moved to the end.
+		const ids = marvinIdsInMarkdown(after.content);
+		expect(ids).toEqual(["a", "b", "c"]);
+		expect(after.morningIds).toEqual(["a", "b", "c"]);
+	});
+
+	it("is idempotent across repeated refreshes", () => {
+		const morning = firstPass([open("a", "First"), open("b", "Second")]);
+		const checked = morning.replace("- [ ] Second", "- [x] Second");
+
+		const once = refreshTodayRegion(checked, { date, items: [open("a", "First")] });
+		const twice = refreshTodayRegion(once.content, { date, items: [open("a", "First")] });
+
+		expect(twice.content).toBe(once.content);
+		expect(twice.changed).toBe(false);
+		expect(marvinIdsInMarkdown(twice.content)).toEqual(["a", "b"]);
+	});
+
+	it("does not preserve an unchecked task Marvin no longer returns", () => {
+		// Unchecked and absent from the read means it genuinely left the
+		// projection — deleted, rescheduled, or unscheduled. Preserving those
+		// would pin stale work into the note permanently.
+		const morning = firstPass([open("a", "First"), open("b", "Second")]);
+
+		const after = refreshTodayRegion(morning, { date, items: [open("a", "First")] });
+
+		expect(after.content).not.toContain("Second");
+		expect(marvinIdsInMarkdown(after.content)).toEqual(["a"]);
+	});
+
+	it("lets a live item win when Marvin returns the task again", () => {
+		// Un-completed in Marvin: the read is authoritative, so it renders
+		// open again rather than staying stuck as the preserved checked line.
+		const morning = firstPass([open("a", "First")]);
+		const checked = morning.replace("- [ ] First", "- [x] First");
+
+		const after = refreshTodayRegion(checked, { date, items: [open("a", "First")] });
+
+		expect(after.content).toContain("- [ ] First");
+		expect(after.content).not.toContain("- [x] First");
+	});
+
+	it("keeps a completed task that was added after morning", () => {
+		const morning = firstPass([open("a", "First")]);
+		const withLate = refreshTodayRegion(morning, {
+			date,
+			items: [open("a", "First"), open("late", "Added later")],
+		}).content;
+		expect(withLate).toContain("### Added since morning");
+
+		const checked = withLate.replace("- [ ] Added later", "- [x] Added later");
+		const after = refreshTodayRegion(checked, { date, items: [open("a", "First")] });
+
+		expect(after.content).toContain("- [x] Added later");
+		expect(after.lateIds).toEqual(["late"]);
+	});
+
+	it("does not show the empty placeholder when only completed work remains", () => {
+		const morning = firstPass([open("a", "First")]);
+		const checked = morning.replace("- [ ] First", "- [x] First");
+
+		const after = refreshTodayRegion(checked, { date, items: [] });
+
+		expect(after.content).toContain("- [x] First");
+		expect(after.content).not.toContain("No Amazing Marvin tasks for this date");
+	});
+});
