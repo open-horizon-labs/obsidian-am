@@ -85,10 +85,43 @@ export function refreshTodayRegion(
 	}
 
 	const currentIds = new Set(uniqueItems.map((item) => item.id));
-	morningIds = dedupeStrings(morningIds).filter((id) => currentIds.has(id));
+
+	// Marvin's Today/due reads only return open work — /dueItems is
+	// documented as "open" and there is no endpoint that lists what was
+	// completed on a day. So once a task is checked off, the next refresh
+	// used to drop it, erasing the record of what the day actually
+	// contained. Checked Marvin lines already in the region are carried
+	// through instead, verbatim, so the region becomes a record of the day
+	// rather than only a snapshot of what is still outstanding.
+	const preserved = existingRegion
+		? findCompletedMarvinLines(
+			lines.slice(existingRegion.start + 1, existingRegion.end),
+			currentIds,
+		)
+		: new Map<string, string>();
+
+	morningIds = dedupeStrings(morningIds)
+		.filter((id) => currentIds.has(id) || preserved.has(id));
 	const morningIdSet = new Set(morningIds);
-	const morning = uniqueItems.filter((item) => morningIdSet.has(item.id));
-	const late = uniqueItems.filter((item) => !morningIdSet.has(item.id));
+	const itemsById = new Map(uniqueItems.map((item) => [item.id, item]));
+
+	// Rendered here rather than inside renderManagedBlock so a completed
+	// task keeps its original position: morningIds carries the ordering, and
+	// each slot resolves to either the live item or the preserved line.
+	const morning = morningIds.map((id) => {
+		const item = itemsById.get(id);
+		return item ? renderItem(item) : preserved.get(id)!;
+	});
+	const lateIds = [
+		...uniqueItems
+			.filter((item) => !morningIdSet.has(item.id))
+			.map((item) => item.id),
+		...[...preserved.keys()].filter((id) => !morningIdSet.has(id)),
+	];
+	const late = lateIds.map((id) => {
+		const item = itemsById.get(id);
+		return item ? renderItem(item) : preserved.get(id)!;
+	});
 	const block = renderManagedBlock(options.date, morningIds, morning, late);
 
 	lines.splice(replaceFrom, replaceTo - replaceFrom, ...block);
@@ -100,7 +133,7 @@ export function refreshTodayRegion(
 		changed: content !== original,
 		createdRegion,
 		morningIds,
-		lateIds: late.map((item) => item.id),
+		lateIds,
 	};
 }
 
@@ -229,11 +262,37 @@ function findLegacyMarvinItems(
 	};
 }
 
+/** Checked Marvin task lines in the region whose IDs the current read no
+ * longer returns, keyed by ID and kept in their existing order.
+ *
+ * Only checked lines are carried through. An unchecked line Marvin no longer
+ * returns has genuinely left the projection — it was deleted, rescheduled, or
+ * unscheduled — and preserving those would pin stale work into the note
+ * permanently. The limited API is also one-way here (`markDone` with no
+ * un-complete counterpart), so unchecking a preserved line in Obsidian does
+ * not resurrect it in Marvin; the next refresh drops it. */
+function findCompletedMarvinLines(
+	regionLines: string[],
+	currentIds: ReadonlySet<string>,
+): Map<string, string> {
+	const preserved = new Map<string, string>();
+	for (const line of regionLines) {
+		if (!/^\s*[-*+]\s*\[[xX]\]/.test(line)) {
+			continue;
+		}
+		const id = line.match(MARVIN_ITEM_LINK)?.[1];
+		if (id && !currentIds.has(id) && !preserved.has(id)) {
+			preserved.set(id, line);
+		}
+	}
+	return preserved;
+}
+
 function renderManagedBlock(
 	date: string,
 	morningIds: string[],
-	morning: TodayProjectionItem[],
-	late: TodayProjectionItem[],
+	morning: string[],
+	late: string[],
 ): string[] {
 	const metadata: TodayRegionMetadata = {
 		version: 1,
@@ -242,13 +301,13 @@ function renderManagedBlock(
 	};
 	const lines = [
 		`${TODAY_REGION_PREFIX}${JSON.stringify(metadata)} -->`,
-		...morning.map(renderItem),
+		...morning,
 	];
 	if (late.length > 0) {
 		if (morning.length > 0) {
 			lines.push("");
 		}
-		lines.push("### Added since morning", ...late.map(renderItem));
+		lines.push("### Added since morning", ...late);
 	}
 	if (morning.length === 0 && late.length === 0) {
 		lines.push("<!-- No Amazing Marvin tasks for this date. -->");
