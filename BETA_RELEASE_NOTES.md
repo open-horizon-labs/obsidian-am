@@ -1,101 +1,102 @@
 ## What's in this beta
 
-Opt-in incremental Amazing Marvin sync — an alternative to the REST importer
-that reads Marvin's CouchDB `_changes` feed instead of repeatedly rebuilding
-the whole imported tree. Off by default; the existing REST importer remains
-the default and fallback either way.
+Mostly a settings overhaul, plus the last round's sync fixes confirmed working
+by a real-vault test.
 
-- **Obsidian plugin:** an "Experimental incremental sync" section in
-  settings (collapsed by default — click to expand). Enabling it hydrates a
-  local cache from Amazing Marvin's database, then keeps it current via the
-  changes feed, updating only the notes that actually changed.
-- **MCP server:** `marvin_categories`/`marvin_children` can read the same
-  cache the plugin maintains, skipping a REST round trip when it's fresh.
-  Opt-in via an environment variable; no new credentials needed there.
+Incremental sync itself is unchanged since beta4: an opt-in alternative to the
+REST importer that reads Marvin's CouchDB `_changes` feed instead of rebuilding
+the whole imported tree. Off by default; the REST importer stays the default and
+fallback.
 
-## Fixed since beta3
+## Settings tab reorganized
 
-**The MCP cache wrapper broke every other tool.** With a cache path
-configured, `marvin_today`, `marvin_due`, `marvin_labels`,
-`marvin_create_task`, and `marvin_mark_done` all failed with
-`... is not a function` — only categories and children worked. Cause: the
-wrapper spread a class instance, and object spread doesn't copy prototype
-methods. Now uses explicit per-method delegation, with regression tests
-built on a real class fixture (the old fixture was an object literal, which
-structurally could not catch this). Thanks to the beta3 tester who found and
-diagnosed this precisely — see
-[#81](https://github.com/open-horizon-labs/obsidian-am/issues/81).
+A design critique pass found the tab had outgrown its structure — ~30 rows in
+one scroll, two of them floating above any heading at all. It's now grouped by
+what the setting actually *does* rather than by loose verbs:
 
-**MCP setup instructions were misleading.** Updating the plugin via BRAT
-does *not* update the repository checkout the MCP server is built from, so
-setting the cache-path variable against an older checkout was silently
-ignored — no warning, it just kept using REST. The README now spells out the
-fetch/checkout/build steps and how to verify a real cache hit.
+- **Connection** — the API token, finally under a heading
+- **Category and project import** — unchanged
+- **Today's tasks** / **Automatic refresh** — split apart. Background file
+  rewriting was previously filed under what read like a display preference; it
+  now has its own heading, because it's the highest-consequence thing here.
+- **How imported tasks are written** (was "Task formatting")
+- **Sending changes to Marvin** (was "Task creation") — now also holds "Mark
+  tasks done in Marvin," which used to sit at the very top next to the API
+  token as if it were part of setup
+- **Advanced: incremental sync** and **Advanced: local server**, both
+  collapsed, both at the bottom
 
-## Fixed in earlier betas
+Specific fixes you may notice:
 
-- **beta3:** the settings tab tore itself down and rebuilt on every toggle,
-  so the credential fields rendered below the fold with no cue — the cause
-  of "there's no place to put the additional creds." Fields now render in
-  place; both experimental sections collapse by default.
-- **beta2:** database credentials now match Amazing Marvin's own API
-  settings page (server, database name, user, password as four fields).
+- **"Tasks to Show" is now "Tasks to include."** It collided with "Show Due
+  Date" 170 lines further down — one picks which *tasks* appear, the other
+  which *date fields* appear, and the old names read as contradicting each
+  other.
+- **The three bare "Show Due/Start/Scheduled Date" toggles are now one "Dates
+  to show" row** with labeled checkboxes. They were the only rows in the whole
+  tab with no description.
+- **Settings that only apply to one metadata format now grey out** instead of
+  sitting there looking active. Same for the label prefix when labels-as-tags
+  is off. Nothing new was hidden — a row that vanishes is a row nobody knows
+  exists.
+- **Two more instances of the bug that caused "there's no place to put the
+  creds"**: adding/removing an import root rebuilt the entire tab (collapsing
+  both advanced sections), and a *background* sync could rebuild the tab while
+  you were mid-typing in a credential field. Both now update in place.
+- **"Remove" on an import root asks for a confirming second click** — it
+  silently un-imports a whole subtree, and the much safer "Reset cache" already
+  had that guard.
+- Sentence case throughout, two copy errors fixed, and an invalid refresh
+  interval now tells you it was rejected instead of silently ignoring you.
 
-**Known limitation:** the plugin's note-writing path still hasn't been
-exercised end-to-end in a real vault — the beta3 tester deliberately
-stopped short of creating a test task, because the bug above had broken the
-task-writing tools needed to clean it up afterward. That path (create /
-rename / move / complete / delete propagation, cache reset, and the
-REST-importer-still-works check) is the most valuable thing to test now.
+## Incremental sync is now desktop-only
+
+The settings section is gated to desktop, matching the local server section.
+It asks for full-database credentials, and a phone — autocorrecting keyboard,
+no reveal toggle on the password field — is the wrong place to type one.
+
+Note: this hides the *UI*, it doesn't disable an already-configured sync. If
+you set it up on desktop and your settings sync to mobile, the sync still runs
+there. Say so if you'd rather it didn't.
+
+## Confirmed working since beta4
+
+A tester verified the whole path in a real vault, which retires the "never run
+in a real Obsidian vault" caveat these notes carried for four releases:
+
+- The beta3 MCP regression is gone — `marvin_today`, `marvin_due`,
+  `marvin_labels`, `marvin_create_task`, and `marvin_mark_done` all work with a
+  cache path configured.
+- A task created via MCP appeared in the cache *and* in `AmazingMarvin/Inbox.md`,
+  then disappeared from both after completion and sync.
+- Window-focus auto-sync works without touching "Sync now" — about a 20-second
+  round trip, both directions.
 
 ## How to test
 
-### Obsidian plugin
+### Settings (new this round)
 
-1. In Amazing Marvin, go to the API settings page and find the **database**
-   server, database name, user, and password (a different credential from
-   the plugin's limited API token — these grant full database read access,
-   so treat them accordingly).
-2. In Obsidian settings, expand "Experimental incremental sync," enable the
-   toggle, and copy each of those four fields into the matching field.
-3. Click "Sync now" (disabled with an inline reason until all four fields
-   are filled). Confirm the resulting notes match what the regular "Import
-   categories and tasks" command produces.
-4. **The priority test:** in Marvin, create a task, rename it, move it to
-   another category, complete it, then delete it — one change at a time.
-   Confirm each lands in the vault within about a minute, or immediately via
-   "Sync now" / the "Sync Amazing Marvin now (incremental)" command.
-5. Click "Reset cache" (twice within 4 seconds to confirm), then sync again
-   — confirm it re-hydrates cleanly.
-6. Disable incremental sync and confirm the regular REST importer still
-   works unchanged.
+1. Open the plugin settings and read down the tab. Does the grouping make sense?
+   Does anything feel like it's under the wrong heading?
+2. Expand "Advanced: incremental sync," toggle it on, and confirm the four
+   credential fields enable in place without the section collapsing.
+3. With the settings tab open and the advanced section expanded, wait for a
+   background sync (or switch focus away and back). The section should stay open
+   and keep your cursor where it was.
+4. Switch "Items to import" to "Selected roots," add and remove a root, and
+   confirm the advanced sections stay expanded throughout.
+5. Set "Metadata format" to a Tasks format and confirm "Put task title first"
+   and "Date link format" grey out.
+6. Type nonsense into "Refresh interval" and confirm it tells you it was
+   rejected.
 
-### MCP server (for agent use)
+### Still uncovered
 
-1. **Update the checkout first.** The MCP server is built from this
-   repository, not from the BRAT-installed plugin — an older checkout has no
-   code reading the cache variable and will silently ignore it:
-   ```sh
-   git -C /path/to/obsidian-am fetch --tags
-   git -C /path/to/obsidian-am checkout 0.11.0-beta4
-   npm --prefix /path/to/obsidian-am ci
-   npm --prefix /path/to/obsidian-am run build
-   ```
-2. Set `AMAZING_MARVIN_INCREMENTAL_CACHE_PATH` to
-   `<vault>/.obsidian/plugins/<plugin-id>/marvin-incremental-cache-v1.json`
-   (exists only after incremental sync has run at least once), alongside the
-   existing `AMAZING_MARVIN_API_TOKEN`. Restart the MCP server/session.
-3. Call `marvin_categories` and `marvin_children` — a cache hit reports
-   `"freshness": "cached"` and `"origin": "local"`.
-4. Point the variable at a nonexistent file and confirm a clean fallback to
-   `"freshness": "fresh"` / `"origin": "public"`. Restore the real path.
-5. **Now verify the beta3 regression is gone:** with a valid cache path set,
-   call `marvin_today`, `marvin_due`, and `marvin_labels`. All three must
-   work and report `origin: "public"` (they intentionally never use the
-   cache). `marvin_create_task` and `marvin_mark_done` should work too.
+Rename / move / delete propagation (MCP doesn't expose those routes),
+reset-cache rehydration, and disabling incremental sync then running the regular
+importer.
 
 ## Feedback
 
-Please leave test results on
-[issue #55](https://github.com/open-horizon-labs/obsidian-am/issues/55).
-For anything that looks like a distinct bug, open a new issue instead.
+[Issue #55](https://github.com/open-horizon-labs/obsidian-am/issues/55) for test
+results; a new issue for anything that looks like a distinct bug.
