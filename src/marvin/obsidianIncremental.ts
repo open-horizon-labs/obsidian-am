@@ -91,6 +91,11 @@ export class ObsidianIncrementalCacheStore implements IncrementalCacheStore {
 		}
 	}
 
+	/** Deletes the cache outright. Safe only because everything in the file is
+	 * derived and the next sync re-hydrates it — see the invariant on
+	 * IncrementalCacheState. If anything unique ever gets stored here, this
+	 * stops being a recovery step and becomes data loss, and the settings
+	 * button that calls it becomes a trap. */
 	async clear(): Promise<void> {
 		if (await this.adapter.exists(this.path)) {
 			await this.adapter.remove(this.path);

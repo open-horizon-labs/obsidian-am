@@ -349,6 +349,22 @@ export function applyCouchChanges(
 
 		if (!physicallyDeleted && doc?.db === "Tasks") {
 			const task = taskFromDocument(doc);
+			// Completed tasks are dropped, not retained. This looks like an
+			// easy place to add "keep done tasks so we can show what was
+			// finished today" — don't. Marvin's REST API cannot list
+			// completions, so this file would become the only copy of that
+			// history, and it would stop being a cache: "Reset cache" would
+			// turn into data loss, a schema bump would need a migration
+			// instead of just re-hydrating, and "delete it any time, REST is
+			// the source of truth" would no longer be true.
+			//
+			// Completion history belongs in the vault, where it is versioned,
+			// backed up, portable, and readable without this plugin.
+			// src/marvin/todayProjection.ts already keeps checked lines in the
+			// daily note for exactly that reason. If a future need can't be
+			// met from the notes, read it live at projection time rather than
+			// storing it here. See "Cache holds only derived data" in
+			// docs/architecture/marvin-client-and-mcp.md.
 			if (task && isPresentDocument(doc) && doc.done !== true) {
 				addChild(state.children, task.parentId, task);
 				markParent(task.parentId, affectedContainerIds, () => {

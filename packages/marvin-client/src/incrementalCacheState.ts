@@ -43,6 +43,19 @@ export function parseIncrementalSyncRequest(
 export type CachedMarvinItem = Category | Project | Task;
 export type CachedMarvinContainer = Category | Project;
 
+/** Every field here must be **derived** — reconstructible by re-reading
+ * Amazing Marvin from scratch. That invariant is what makes the file
+ * disposable: a failed parse re-hydrates instead of migrating, and "Reset
+ * cache" is a recovery step rather than data loss.
+ *
+ * Do not add a field holding the only copy of something. The tempting case is
+ * completion history, since Marvin's REST API cannot list what was completed
+ * on a day — which is exactly why storing it here would make this a system of
+ * record rather than a cache. Durable user data goes in the vault, where it is
+ * versioned, backed up, and readable without this plugin.
+ *
+ * See "Cache holds only derived data" in
+ * docs/architecture/marvin-client-and-mcp.md. */
 export interface IncrementalCacheState {
 	version: 1;
 	sourceKey: string;
