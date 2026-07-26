@@ -130,6 +130,14 @@ function categoryDisplayPath(
 export class AmazingMarvinSettingsTab extends PluginSettingTab {
 	plugin: AmazingMarvinPlugin;
 
+	/** Updates only the incremental-sync status row, leaving the rest of
+	 * the tab untouched. The plugin calls this after every sync — including
+	 * automatic ones — so a full display() rebuild would collapse the
+	 * advanced <details> and steal focus out of a credential field the user
+	 * was typing into. Reassigned by display(); a no-op before the tab has
+	 * ever rendered, and on mobile where the section isn't built. */
+	refreshIncrementalStatus: () => void = () => {};
+
 	constructor(app: App, plugin: AmazingMarvinPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
@@ -149,13 +157,19 @@ private a(href: string, text: string) {
 		const { containerEl } = this;
 
 		containerEl.empty();
+		// Every row below is about to be discarded, so the closure the old
+		// render handed out is stale until reassigned.
+		this.refreshIncrementalStatus = () => {};
+
+		new Setting(containerEl)
+			.setHeading().setName("Connection");
 
 		const TokenDescEl = createFragment();
-		TokenDescEl.appendText('Get your Token at the ');
+		TokenDescEl.appendText('Get your token at the ');
 		TokenDescEl.appendChild(this.a('https://app.amazingmarvin.com/pre?api', 'API page'));
 
 		new Setting(containerEl)
-			.setName("API Token")
+			.setName("API token")
 			.setDesc(TokenDescEl)
 			.addText((text) =>
 				text
@@ -168,22 +182,11 @@ private a(href: string, text: string) {
 			);
 
 		new Setting(containerEl)
-			.setName("Mark tasks as done")
-			.setDesc("Attempt to mark tasks as done in Amazing Marvin. Note that this only applies to Amazing Marvins tasks imported or created with this plugin.")
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.attemptToMarkTasksAsDone)
-				.onChange(async (value) => {
-					this.plugin.settings.attemptToMarkTasksAsDone = value;
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
 			.setHeading().setName("Category and project import");
 
 		new Setting(containerEl)
-			.setName("Managed folder")
-			.setDesc("Vault-relative folder for imported categories, projects, and Inbox. Existing category and project notes move when their Marvin ID can be identified; old empty folders are left in place.")
+			.setName("Import folder")
+			.setDesc("Vault-relative folder for imported categories, projects, and Inbox. Existing notes move with their Marvin ID; old empty folders are left in place.")
 			.addText(text => text
 				.setPlaceholder("AmazingMarvin")
 				.setValue(this.plugin.settings.syncFolder)
@@ -203,30 +206,53 @@ private a(href: string, text: string) {
 				.onChange(async (value: SyncSelectionMode) => {
 					this.plugin.settings.syncSelectionMode = value;
 					await this.plugin.saveSettings();
-					this.display();
+					renderImportRoots();
 				})
 			);
 
-		if (this.plugin.settings.syncSelectionMode === "selected") {
+		// Its own container, re-rendered alone: this path used to call
+		// this.display() on every add/remove/mode change, rebuilding all
+		// ~30 rows, losing scroll position, and (since the advanced
+		// sections became <details>) slamming both of them shut.
+		const importRootsEl = containerEl.createDiv();
+		const renderImportRoots = () => {
+			importRootsEl.empty();
+			if (this.plugin.settings.syncSelectionMode !== "selected") {
+				return;
+			}
 			for (const root of this.plugin.settings.syncRoots) {
-				new Setting(containerEl)
+				new Setting(importRootsEl)
 					.setName(root.title)
 					.setDesc(`Marvin ID: ${root.id}`)
-					.addButton(button => button
-						.setButtonText("Remove")
-						.onClick(async () => {
+					.addButton(button => {
+						let confirming = false;
+						let confirmTimer: number | undefined;
+						button.setButtonText("Remove").onClick(async () => {
+							// Removing a root silently un-imports a whole
+							// subtree, so it gets the same confirm-again
+							// treatment as Reset cache.
+							if (!confirming) {
+								confirming = true;
+								button.setButtonText("Click again to remove");
+								confirmTimer = window.setTimeout(() => {
+									confirming = false;
+									button.setButtonText("Remove");
+								}, 4_000);
+								return;
+							}
+							window.clearTimeout(confirmTimer);
 							this.plugin.settings.syncRoots = (
 								this.plugin.settings.syncRoots.filter(
 									(candidate) => candidate.id !== root.id,
 								)
 							);
 							await this.plugin.saveSettings();
-							this.display();
-						})
-					);
+							renderImportRoots();
+						});
+					});
 			}
 
-			new Setting(containerEl)
+			new Setting(importRootsEl)
 				.setName("Add import root")
 				.setDesc(
 					this.plugin.settings.syncRoots.length === 0
@@ -250,13 +276,15 @@ private a(href: string, text: string) {
 										title: categoryDisplayPath(category, categories),
 									});
 									void this.plugin.saveSettings()
-										.then(() => this.display())
+										.then(() => renderImportRoots())
 										.catch((error) => {
 											console.error(
 												"Could not save Amazing Marvin import root:",
 												error,
 											);
-											new Notice("Could not save the import root.");
+											new Notice(
+												`Could not save the import root: ${error instanceof Error ? error.message : String(error)}`,
+											);
 										});
 								},
 							).open();
@@ -266,7 +294,8 @@ private a(href: string, text: string) {
 						}
 					})
 				);
-		}
+		};
+		renderImportRoots();
 
 		new Setting(containerEl)
 			.setName("Import Inbox")
@@ -279,17 +308,269 @@ private a(href: string, text: string) {
 				})
 			);
 
+		new Setting(containerEl)
+			.setHeading().setName("Today's tasks");
+
+		// "Tasks to include", not "Tasks to Show": this picks which TASKS
+		// enter the Today region, while the date settings further down pick
+		// which DATE FIELDS render on each task. The old pair of names
+		// ("Tasks to Show" / "Show Due Date") read as contradicting each
+		// other from 170 lines apart.
+		new Setting(containerEl)
+			.setName("Tasks to include")
+			.setDesc("Whether the managed Today region lists due tasks, scheduled tasks, or both.")
+			.addDropdown(dropdown => dropdown
+				.addOption('due', 'Due tasks')
+				.addOption('scheduled', 'Scheduled tasks')
+				.addOption('both', 'Due and scheduled tasks')
+				.setValue(this.plugin.settings.todayTasksToShow)
+				.onChange(async (value: 'due' | 'scheduled' | 'both') => {
+					this.plugin.settings.todayTasksToShow = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		// Its own heading on purpose: this rewrites files on a timer, which
+		// is the highest-consequence behavior in the plugin. Filed under a
+		// heading that read like a display preference, it was easy to flip
+		// without registering what it does.
+		new Setting(containerEl)
+			.setHeading().setName("Automatic refresh");
+
+		new Setting(containerEl)
+			.setName("Refresh Today tasks automatically")
+			.setDesc("Rewrite the managed Today region while Obsidian is open and when the window regains focus. Only notes whose managed region has already been initialized are touched.")
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.autoRefreshTodayTasks)
+				.onChange(async (value) => {
+					this.plugin.settings.autoRefreshTodayTasks = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		const refreshIntervalSetting = new Setting(containerEl)
+			.setName("Refresh interval")
+			.setDesc("Minutes between background refreshes.")
+			.addText(text => text
+				.setPlaceholder("5")
+				.setValue(this.plugin.settings.todayRefreshIntervalMinutes.toString())
+				.onChange(async (value) => {
+					const parsed = Number.parseInt(value, 10);
+					if (Number.isFinite(parsed) && parsed > 0) {
+						this.plugin.settings.todayRefreshIntervalMinutes = parsed;
+						await this.plugin.saveSettings();
+						refreshIntervalSetting.setDesc("Minutes between background refreshes.");
+						return;
+					}
+					// Previously this silently swallowed bad input, leaving
+					// the field showing a value the plugin wasn't using.
+					refreshIntervalSetting.setDesc(
+						`Not a whole number above zero — still using ${this.plugin.settings.todayRefreshIntervalMinutes} minutes.`,
+					);
+				})
+			);
+
+		// Renamed from "Task formatting", and moved above the outbound
+		// section: every row here governs what gets written INTO the vault
+		// for imported tasks, which the old name never made explicit.
+		new Setting(containerEl)
+			.setHeading().setName("How imported tasks are written");
+
+		// Declared before "Metadata format" so its onChange can enable and
+		// disable them in place. These two only affect the Dataview format;
+		// showing them live under the other formats implied they did
+		// something there.
+		let titleFirstSetting: Setting;
+		let dateLinkFormatSetting: Setting;
+		const syncDataviewOnlyRows = () => {
+			const isDataview = this.plugin.settings.taskMetadataFormat === "dataview";
+			titleFirstSetting?.setDisabled(!isDataview);
+			dateLinkFormatSetting?.setDisabled(!isDataview);
+		};
+
+		new Setting(containerEl)
+			.setName("Metadata format")
+			.setDesc("Keep the existing Dataview fields, or emit a format that Obsidian Tasks can query.")
+			.addDropdown(dropdown => dropdown
+				.addOption("dataview", "Dataview (current)")
+				.addOption("tasks-dataview", "Tasks Dataview")
+				.addOption("tasks-emoji", "Tasks emoji")
+				.setValue(this.plugin.settings.taskMetadataFormat)
+				.onChange(async (value: TaskMetadataFormat) => {
+					this.plugin.settings.taskMetadataFormat = value;
+					await this.plugin.saveSettings();
+					syncDataviewOnlyRows();
+				})
+			);
+
+		// One row, three labeled checkboxes — was three consecutive bare
+		// toggles, the only rows in the file with no description at all.
+		// Obsidian's own toggle carries no label, so three chained
+		// addToggle() calls would render three anonymous switches; real
+		// checkboxes in controlEl are what allows per-date labels.
+		const datesSetting = new Setting(containerEl)
+			.setName("Dates to show")
+			.setDesc("Which Marvin dates appear on each written task.");
+		const dateFields: Array<{
+			label: string;
+			key: "showDueDate" | "showStartDate" | "showScheduledDate";
+		}> = [
+			{ label: "Due", key: "showDueDate" },
+			{ label: "Start", key: "showStartDate" },
+			{ label: "Scheduled", key: "showScheduledDate" },
+		];
+		for (const { label, key } of dateFields) {
+			const wrapper = datesSetting.controlEl.createEl("label");
+			wrapper.style.display = "inline-flex";
+			wrapper.style.alignItems = "center";
+			wrapper.style.gap = "0.35em";
+			wrapper.style.marginLeft = "0.75em";
+			const checkbox = wrapper.createEl("input", { type: "checkbox" });
+			checkbox.checked = this.plugin.settings[key];
+			wrapper.createSpan({ text: label });
+			checkbox.addEventListener("change", async () => {
+				this.plugin.settings[key] = checkbox.checked;
+				await this.plugin.saveSettings();
+			});
+		}
+
+		titleFirstSetting = new Setting(containerEl)
+			.setName("Put task title first")
+			.setDesc("Put readable task text before dates. Tasks-compatible formats always put the title first.")
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.taskTitleFirst)
+				.onChange(async (value) => {
+					this.plugin.settings.taskTitleFirst = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		const dateLinkDescEl = createFragment();
+		dateLinkDescEl.appendText('Date link format for Dataview, in ');
+		dateLinkDescEl.appendChild(this.a('https://momentjs.com/docs/#/displaying/format/', 'Moment format'));
+		dateLinkDescEl.appendText('. For example, YYYY-[W]WW links each date to its weekly note.');
+
+		dateLinkFormatSetting = new Setting(containerEl)
+			.setName("Date link format")
+			.setDesc(dateLinkDescEl)
+			.addText(text => text
+				.setPlaceholder("YYYY-MM-DD")
+				.setValue(this.plugin.settings.taskDateLinkFormat)
+				.onChange(async (value) => {
+					this.plugin.settings.taskDateLinkFormat = value.trim()
+						|| "YYYY-MM-DD";
+					await this.plugin.saveSettings();
+				})
+			);
+		syncDataviewOnlyRows();
+
+		new Setting(containerEl)
+			.setName("Task query tag")
+			.setDesc("Optional tag added to every written Marvin task, such as #task for an Obsidian Tasks global filter.")
+			.addText(text => text
+				.setPlaceholder("#task")
+				.setValue(this.plugin.settings.taskTag)
+				.onChange(async (value) => {
+					this.plugin.settings.taskTag = value.trim();
+					await this.plugin.saveSettings();
+				})
+			);
+
+		let labelPrefixSetting: Setting;
+
+		new Setting(containerEl)
+			.setName("Marvin labels as tags")
+			.setDesc("Resolve Marvin label IDs through the limited API and add their names as Obsidian tags.")
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showMarvinLabelsAsTags)
+				.onChange(async (value) => {
+					this.plugin.settings.showMarvinLabelsAsTags = value;
+					await this.plugin.saveSettings();
+					// Disabled in place rather than hidden: the prefix means
+					// nothing with labels-as-tags off, but a row that
+					// vanishes is a row nobody knows exists.
+					labelPrefixSetting?.setDisabled(!value);
+				})
+			);
+
+		labelPrefixSetting = new Setting(containerEl)
+			.setName("Marvin label tag prefix")
+			.setDesc("Optional tag namespace. The default turns “Knowledge work” into #marvin/Knowledge-work.")
+			.setDisabled(!this.plugin.settings.showMarvinLabelsAsTags)
+			.addText(text => text
+				.setPlaceholder("marvin")
+				.setValue(this.plugin.settings.marvinLabelTagPrefix)
+				.onChange(async (value) => {
+					this.plugin.settings.marvinLabelTagPrefix = value.trim();
+					await this.plugin.saveSettings();
+				})
+			);
+
+		// Renamed from "Task creation" and moved below the inbound section:
+		// these govern what this plugin sends TO Marvin. "Mark tasks done"
+		// moved here from the unheaded rows at the top of the tab, where it
+		// sat next to the API token as if it were part of setup.
+		new Setting(containerEl)
+			.setHeading().setName("Sending changes to Marvin");
+
+		new Setting(containerEl)
+			.setName("Note link text")
+			.setDesc("Link text for the note reference added to tasks this plugin creates. Leave empty to use the note's own name.")
+			.addText((text) =>
+				text
+					.setPlaceholder("Note link text")
+					.setValue(this.plugin.settings.linkBackToObsidianText)
+					.onChange(async (value) => {
+						this.plugin.settings.linkBackToObsidianText = value.trim();
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Obsidian link format")
+			.setDesc("Advanced URI restores links for workflows using the Advanced URI community plugin; Standard works with Obsidian itself.")
+			.addDropdown(dropdown => dropdown
+				.addOption("advanced-uri", "Advanced URI")
+				.addOption("standard", "Standard Obsidian URI")
+				.setValue(this.plugin.settings.obsidianLinkFormat)
+				.onChange(async (value: ObsidianLinkFormat) => {
+					this.plugin.settings.obsidianLinkFormat = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Mark tasks done in Marvin")
+			.setDesc("When you check off a task in Obsidian, mark it done in Amazing Marvin. Only applies to tasks this plugin imported or created.")
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.attemptToMarkTasksAsDone)
+				.onChange(async (value) => {
+					this.plugin.settings.attemptToMarkTasksAsDone = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		// Desktop-only, like the local server below: this asks for
+		// full-database credentials, and a phone is the worst place to type
+		// one into a field with no reveal toggle against an autocorrecting
+		// keyboard. Hiding the UI does not disable an already-configured
+		// sync — settings sync from a desktop still carries the values, and
+		// the runtime honors them.
+		//
 		// Collapsed by default and never torn down/rebuilt on toggle: a
 		// prior version called this.display() on every change here, which
 		// destroyed and rebuilt the whole tab with no scroll/focus
 		// continuity — a real tester reported "there's no place to put the
 		// additional creds" because the newly-created fields landed below
 		// the fold with no visual cue anything had changed. Fields are now
-		// always present (matching the Local Server section's own
-		// setDisabled pattern below) and just enabled/disabled in place.
+		// always present and just enabled/disabled in place.
+		if (!Platform.isDesktopApp) {
+			return;
+		}
+
 		const incrementalDetails = containerEl.createEl("details");
 		const incrementalSummary = incrementalDetails.createEl("summary", {
-			text: "Experimental incremental sync",
+			text: "Advanced: incremental sync (experimental)",
 		});
 		incrementalSummary.style.cursor = "pointer";
 		incrementalSummary.style.fontWeight = "600";
@@ -467,247 +748,61 @@ private a(href: string, text: string) {
 				});
 			});
 		updateStatusSetting();
+		this.refreshIncrementalStatus = updateStatusSetting;
 
-		new Setting(containerEl)
-			.setHeading().setName("Today Tasks");
+		const localServerDetails = containerEl.createEl("details");
+		const localServerSummary = localServerDetails.createEl("summary", {
+			text: "Advanced: local server",
+		});
+		localServerSummary.style.cursor = "pointer";
+		localServerSummary.style.fontWeight = "600";
+		localServerSummary.style.padding = "8px 0";
 
-		new Setting(containerEl)
-			.setName("Tasks to Show")
-			.setDesc("Choose whether to include due tasks, scheduled tasks, or both")
-			.addDropdown(dropdown => dropdown
-				.addOption('due', 'Due Tasks')
-				.addOption('scheduled', 'Scheduled Tasks')
-				.addOption('both', 'Due and Scheduled Tasks')
-				.setValue(this.plugin.settings.todayTasksToShow)
-				.onChange(async (value: 'due' | 'scheduled' | 'both') => {
-					this.plugin.settings.todayTasksToShow = value;
-					await this.plugin.saveSettings();
-				})
-			);
+		const lsDescEl = createFragment();
+		lsDescEl.appendText('The local API can speed up the plugin. See the ');
+		lsDescEl.appendChild(this.a('https://help.amazingmarvin.com/en/articles/5165191-desktop-local-api-server', 'Desktop Local API Server'));
+		lsDescEl.appendText(' for more information.');
+		new Setting(localServerDetails)
+			.setName("About the local server")
+			.setDesc(lsDescEl);
 
-		new Setting(containerEl)
-			.setName("Refresh managed Today tasks automatically")
-			.setDesc("Refresh an initialized managed region while Obsidian is open and when the window regains focus.")
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.autoRefreshTodayTasks)
-				.onChange(async (value) => {
-					this.plugin.settings.autoRefreshTodayTasks = value;
-					await this.plugin.saveSettings();
-				})
-			);
+		// Local Server Toggle
+		let localServerToggle = new Setting(localServerDetails)
+			.setName("Use local server")
+			.setDesc("Try the local Amazing Marvin desktop API before the public API.");
 
-		new Setting(containerEl)
-			.setName("Refresh interval")
-			.setDesc("Minutes between background refreshes. Existing notes are only changed after their managed region has been initialized.")
+		let localServerHostSetting = new Setting(localServerDetails)
+			.setName("Host")
 			.addText(text => text
-				.setPlaceholder("5")
-				.setValue(this.plugin.settings.todayRefreshIntervalMinutes.toString())
+				.setPlaceholder("localhost")
+				.setValue(this.plugin.settings.localServerHost || "localhost")
+				.setDisabled(!this.plugin.settings.useLocalServer)
 				.onChange(async (value) => {
-					const parsed = Number.parseInt(value, 10);
-					if (Number.isFinite(parsed) && parsed > 0) {
-						this.plugin.settings.todayRefreshIntervalMinutes = parsed;
-						await this.plugin.saveSettings();
-					}
-				})
-			);
-
-		new Setting(containerEl)
-			.setHeading().setName("Task creation");
-
-
-		const noteLink = createFragment();
-		// make this text much shorter
-		noteLink.appendText('Text for note back to Obsidian on tasks created with this plugin. If empty, a link be added.');
-		noteLink.append(activeDocument.createElement('br'));
-
-		new Setting(containerEl)
-			.setName("Note link text")
-			.setDesc(noteLink)
-			.addText((text) =>
-				text
-					.setPlaceholder("Note link text")
-					.setValue(this.plugin.settings.linkBackToObsidianText)
-					.onChange(async (value) => {
-						this.plugin.settings.linkBackToObsidianText = value.trim();
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(containerEl)
-			.setName("Obsidian link format")
-			.setDesc("Advanced URI restores links for workflows using the Advanced URI community plugin; Standard works with Obsidian itself.")
-			.addDropdown(dropdown => dropdown
-				.addOption("advanced-uri", "Advanced URI")
-				.addOption("standard", "Standard Obsidian URI")
-				.setValue(this.plugin.settings.obsidianLinkFormat)
-				.onChange(async (value: ObsidianLinkFormat) => {
-					this.plugin.settings.obsidianLinkFormat = value;
+					this.plugin.settings.localServerHost = value;
 					await this.plugin.saveSettings();
 				})
 			);
 
-
-		new Setting(containerEl)
-			.setHeading().setName("Task formatting");
-
-		new Setting(containerEl)
-			.setName("Metadata format")
-			.setDesc("Keep the existing Dataview fields, or emit a format that Obsidian Tasks can query.")
-			.addDropdown(dropdown => dropdown
-				.addOption("dataview", "Dataview (current)")
-				.addOption("tasks-dataview", "Tasks Dataview")
-				.addOption("tasks-emoji", "Tasks emoji")
-				.setValue(this.plugin.settings.taskMetadataFormat)
-				.onChange(async (value: TaskMetadataFormat) => {
-					this.plugin.settings.taskMetadataFormat = value;
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Put task title first")
-			.setDesc("For the current Dataview format, put readable task text before dates. Tasks-compatible formats always put the title first.")
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.taskTitleFirst)
-				.onChange(async (value) => {
-					this.plugin.settings.taskTitleFirst = value;
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Date link format")
-			.setDesc("Moment format for Dataview date links. For example, YYYY-[W]WW links each date to its weekly note while keeping the date as the alias.")
+		// Local Server Port
+		let localServerPortSetting = new Setting(localServerDetails)
+			.setName("Port")
 			.addText(text => text
-				.setPlaceholder("YYYY-MM-DD")
-				.setValue(this.plugin.settings.taskDateLinkFormat)
+				.setPlaceholder("12082")
+				.setValue(this.plugin.settings.localServerPort?.toString() || "12082")
+				.setDisabled(!this.plugin.settings.useLocalServer)
 				.onChange(async (value) => {
-					this.plugin.settings.taskDateLinkFormat = value.trim()
-						|| "YYYY-MM-DD";
+					this.plugin.settings.localServerPort = value;
 					await this.plugin.saveSettings();
 				})
 			);
 
-		new Setting(containerEl)
-			.setName("Task query tag")
-			.setDesc("Optional tag added to every projected Marvin task, such as #task for an Obsidian Tasks global filter.")
-			.addText(text => text
-				.setPlaceholder("#task")
-				.setValue(this.plugin.settings.taskTag)
-				.onChange(async (value) => {
-					this.plugin.settings.taskTag = value.trim();
-					await this.plugin.saveSettings();
-				})
-			);
+		// Update the disabled state based on the toggle
+		localServerToggle.addToggle(toggle => toggle.onChange(async (value) => {
+			this.plugin.settings.useLocalServer = value;
+			localServerHostSetting.setDisabled(!value);
+			localServerPortSetting.setDisabled(!value);
+			await this.plugin.saveSettings();
+		}).setValue(this.plugin.settings.useLocalServer));
 
-		new Setting(containerEl)
-			.setName("Marvin labels as tags")
-			.setDesc("Resolve Marvin label IDs through the limited API and add their names as Obsidian tags.")
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showMarvinLabelsAsTags)
-				.onChange(async (value) => {
-					this.plugin.settings.showMarvinLabelsAsTags = value;
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Marvin label tag prefix")
-			.setDesc("Optional tag namespace. The default turns “Knowledge work” into #marvin/Knowledge-work.")
-			.addText(text => text
-				.setPlaceholder("marvin")
-				.setValue(this.plugin.settings.marvinLabelTagPrefix)
-				.onChange(async (value) => {
-					this.plugin.settings.marvinLabelTagPrefix = value.trim();
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Show Due Date")
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showDueDate)
-				.onChange(async (value) => {
-					this.plugin.settings.showDueDate = value;
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Show Start Date")
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showStartDate)
-				.onChange(async (value) => {
-					this.plugin.settings.showStartDate = value;
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Show Scheduled Date")
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.showScheduledDate)
-				.onChange(async (value) => {
-					this.plugin.settings.showScheduledDate = value;
-					await this.plugin.saveSettings();
-				})
-			);
-
-		if (Platform.isDesktopApp) {
-			const localServerDetails = containerEl.createEl("details");
-			const localServerSummary = localServerDetails.createEl("summary", {
-				text: "Local Server",
-			});
-			localServerSummary.style.cursor = "pointer";
-			localServerSummary.style.fontWeight = "600";
-			localServerSummary.style.padding = "8px 0";
-
-			const lsDescEl = createFragment();
-			lsDescEl.appendText('The local API can speed up the plugin. See the ');
-			lsDescEl.appendChild(this.a('https://help.amazingmarvin.com/en/articles/5165191-desktop-local-api-server', 'Desktop Local API Server'));
-			lsDescEl.appendText(' for more information.');
-			new Setting(localServerDetails)
-				.setName("About the local server")
-				.setDesc(lsDescEl);
-
-			// Local Server Toggle
-			let localServerToggle = new Setting(localServerDetails)
-				.setName("Use Local Server")
-				.setDesc("Attempt to use the local Amazing Marvin server first");
-
-			let localServerHostSetting = new Setting(localServerDetails)
-				.setName("Host")
-				.addText(text => text
-					.setPlaceholder("localhost")
-					.setValue(this.plugin.settings.localServerHost || "localhost")
-					.setDisabled(!this.plugin.settings.useLocalServer)
-					.onChange(async (value) => {
-						this.plugin.settings.localServerHost = value;
-						await this.plugin.saveSettings();
-					})
-				);
-
-			// Local Server Port
-			let localServerPortSetting = new Setting(localServerDetails)
-				.setName("Port")
-				.addText(text => text
-					.setPlaceholder("12082")
-					.setValue(this.plugin.settings.localServerPort?.toString() || "12082")
-					.setDisabled(!this.plugin.settings.useLocalServer)
-					.onChange(async (value) => {
-						this.plugin.settings.localServerPort = value;
-						await this.plugin.saveSettings();
-					})
-				);
-
-			// Update the disabled state based on the toggle
-			localServerToggle.addToggle(toggle => toggle.onChange(async (value) => {
-				this.plugin.settings.useLocalServer = value;
-				localServerHostSetting.setDisabled(!value);
-				localServerPortSetting.setDisabled(!value);
-				await this.plugin.saveSettings();
-			}).setValue(this.plugin.settings.useLocalServer));
-
-		}
 	}
 }
