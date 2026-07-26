@@ -19,6 +19,18 @@ import {
 // never surfaces an error of its own: an agent asked for fresher data as a
 // nicety, not as a precondition.
 
+/** What a requested refresh actually did, so a caller can tell a
+ * newly-synchronized cache hit from a silent timeout that fell back. */
+export type CacheRefreshOutcome = "synced" | "timed_out" | "skipped";
+
+export interface CacheRefreshResult {
+	requested: true;
+	outcome: CacheRefreshOutcome;
+	waitedMs: number;
+	/** Present on `skipped` to say why nothing was attempted. */
+	reason?: string;
+}
+
 export interface CacheRefreshRequesterOptions {
 	cachePath: string;
 	syncRequestPath: string;
@@ -75,41 +87,54 @@ async function requestsAreGoingUnanswered(
 	return now - request.requestedAt > staleAfterMs;
 }
 
-/** Returns a function that requests one sync and waits for it, bounded. */
+/** Returns a function that requests one sync and waits for it, bounded,
+ * reporting what happened. */
 export function createCacheRefreshRequester(
 	options: CacheRefreshRequesterOptions,
-): () => Promise<void> {
+): () => Promise<CacheRefreshResult> {
 	const timeoutMs = options.timeoutMs ?? 5_000;
 	const pollIntervalMs = options.pollIntervalMs ?? 250;
 	const sleep = options.sleep
 		?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
-	return async () => {
+	return async (): Promise<CacheRefreshResult> => {
+		const startedAt = options.now?.() ?? Date.now();
+		const waited = () => (options.now?.() ?? Date.now()) - startedAt;
+
 		if (await requestsAreGoingUnanswered(options, timeoutMs)) {
-			return;
+			return {
+				requested: true,
+				outcome: "skipped",
+				waitedMs: waited(),
+				reason: "an earlier request is still unclaimed, so nothing is listening",
+			};
 		}
 
 		const before = await lastSyncedAt(options);
-		const now = options.now?.() ?? Date.now();
 		try {
 			await options.writeFile(
 				options.syncRequestPath,
-				JSON.stringify({ requestedAt: now }),
+				JSON.stringify({ requestedAt: startedAt }),
 			);
-		} catch {
-			return; // Can't ask; caller falls back.
+		} catch (error) {
+			return {
+				requested: true,
+				outcome: "skipped",
+				waitedMs: waited(),
+				reason: `could not write the sync request: ${error instanceof Error ? error.message : String(error)}`,
+			};
 		}
 
-		const deadline = now + timeoutMs;
+		const deadline = startedAt + timeoutMs;
 		for (;;) {
 			await sleep(pollIntervalMs);
 			const after = await lastSyncedAt(options);
 			// A cache that didn't exist before and does now also counts.
 			if (after !== undefined && (before === undefined || after > before)) {
-				return;
+				return { requested: true, outcome: "synced", waitedMs: waited() };
 			}
 			if ((options.now?.() ?? Date.now()) >= deadline) {
-				return;
+				return { requested: true, outcome: "timed_out", waitedMs: waited() };
 			}
 		}
 	};

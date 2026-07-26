@@ -10,6 +10,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	createMarvinMcpServer,
+	type MarvinMcpServerOptions,
 	type MarvinOperations,
 } from "./tools.js";
 
@@ -62,7 +63,7 @@ describe("Amazing Marvin MCP", () => {
 
 	async function connect(
 		ops: MarvinOperations,
-		options?: { requestCacheRefresh?: () => Promise<void> },
+		options?: MarvinMcpServerOptions,
 	) {
 		const server = createMarvinMcpServer(ops, options);
 		const client = new Client({ name: "test-client", version: "0.1.0" });
@@ -249,13 +250,21 @@ describe("Amazing Marvin MCP", () => {
 	});
 
 	it("requests a cache refresh only when the refresh parameter is true", async () => {
-		const requestCacheRefresh = vi.fn(async () => {});
+		const requestCacheRefresh = vi.fn(async () => ({
+			requested: true as const,
+			outcome: "synced" as const,
+			waitedMs: 820,
+		}));
 		const client = await connect(operations(), { requestCacheRefresh });
 
 		// Default (omitted) must not trigger a refresh — the passive,
-		// zero-latency read stays the norm.
-		await client.callTool({ name: "marvin_categories", arguments: {} });
+		// zero-latency read stays the norm — and must not report on one.
+		const passive = await client.callTool({
+			name: "marvin_categories",
+			arguments: {},
+		});
 		expect(requestCacheRefresh).not.toHaveBeenCalled();
+		expect(passive.structuredContent).not.toHaveProperty("refresh");
 
 		await client.callTool({
 			name: "marvin_categories",
@@ -270,15 +279,48 @@ describe("Amazing Marvin MCP", () => {
 		expect(requestCacheRefresh).toHaveBeenCalledTimes(2);
 	});
 
-	it("accepts refresh as a no-op when no refresh hook is wired", async () => {
-		// Without a configured cache path the server has nothing to ask, but
-		// the parameter must still be accepted rather than erroring.
+	it("reports what a requested refresh actually did", async () => {
+		// freshness/origin say where the answer came from; this says whether
+		// the refresh the caller asked for actually ran, so they can tell a
+		// newly-synced cache hit from a silent timeout that fell back.
+		for (const outcome of ["synced", "timed_out", "skipped"] as const) {
+			const client = await connect(operations(), {
+				requestCacheRefresh: async () => ({
+					requested: true as const,
+					outcome,
+					waitedMs: 820,
+				}),
+			});
+
+			for (const call of [
+				{ name: "marvin_categories", arguments: { refresh: true } },
+				{ name: "marvin_children", arguments: { parentId: "project-1", refresh: true } },
+			]) {
+				const result = await client.callTool(call);
+				expect(result.structuredContent).toMatchObject({
+					refresh: { requested: true, outcome, waitedMs: 820 },
+				});
+			}
+		}
+	});
+
+	it("reports skipped with a reason when no cache is configured", async () => {
+		// Without a configured cache path there is nothing to ask, but the
+		// parameter must still be accepted and honestly reported rather than
+		// silently ignored.
 		const client = await connect(operations());
 		const result = await client.callTool({
 			name: "marvin_categories",
 			arguments: { refresh: true },
 		});
+
 		expect(result.isError ?? false).toBe(false);
+		expect(result.structuredContent).toMatchObject({
+			refresh: { requested: true, outcome: "skipped", waitedMs: 0 },
+		});
+		expect(
+			(result.structuredContent as { refresh: { reason?: string } }).refresh.reason,
+		).toContain("no incremental cache");
 	});
 
 });

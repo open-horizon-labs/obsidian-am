@@ -61,10 +61,12 @@ describe("createCacheRefreshRequester", () => {
 			},
 		});
 
-		await request();
+		const result = await request();
 
 		expect(polls).toBe(2);
 		expect(JSON.parse(fs.files.get(CACHE)!).lastSuccessfulSyncAt).toBe(9_999);
+		expect(result).toMatchObject({ requested: true, outcome: "synced" });
+		expect(result.waitedMs).toBeGreaterThan(0);
 	});
 
 	it("gives up at the timeout when nothing services the request", async () => {
@@ -89,10 +91,11 @@ describe("createCacheRefreshRequester", () => {
 			},
 		});
 
-		await request();
+		const result = await request();
 
 		// Bounded: ~5 polls at 100ms inside a 500ms budget, not an open loop.
 		expect(polls).toBeLessThanOrEqual(6);
+		expect(result).toMatchObject({ requested: true, outcome: "timed_out" });
 	});
 
 	it("returns immediately when a previous request was never picked up", async () => {
@@ -115,9 +118,11 @@ describe("createCacheRefreshRequester", () => {
 			sleep,
 		});
 
-		await request();
+		const result = await request();
 
 		expect(sleep).not.toHaveBeenCalled();
+		expect(result).toMatchObject({ requested: true, outcome: "skipped" });
+		expect(result.reason).toContain("nothing is listening");
 	});
 
 	it("still waits when a pending request is recent enough to be in flight", async () => {
@@ -166,9 +171,10 @@ describe("createCacheRefreshRequester", () => {
 			},
 		});
 
-		await request();
+		const result = await request();
 
 		expect(fs.files.has(CACHE)).toBe(true);
+		expect(result).toMatchObject({ requested: true, outcome: "synced" });
 	});
 
 	it("never throws when the request file can't be written", async () => {
@@ -181,7 +187,10 @@ describe("createCacheRefreshRequester", () => {
 			sleep: async () => {},
 		});
 
-		// A refresh is a nicety, not a precondition — the caller falls back.
-		await expect(request()).resolves.toBeUndefined();
+		// A refresh is a nicety, not a precondition — the caller falls back,
+		// and is told why rather than left guessing.
+		const result = await request();
+		expect(result).toMatchObject({ requested: true, outcome: "skipped" });
+		expect(result.reason).toContain("EACCES");
 	});
 });

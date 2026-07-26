@@ -9,6 +9,7 @@ import {
 	type MarvinRouter,
 	marvinDeepLink,
 } from "@open-horizon/marvin-client";
+import type { CacheRefreshResult } from "./incrementalRefresh.js";
 
 export type MarvinOperations = Pick<
 	MarvinRouter,
@@ -97,10 +98,18 @@ function success(structuredContent: Record<string, unknown>) {
 	};
 }
 
-function readSuccess(result: MarvinReadResult<MarvinItem[]>) {
+function readSuccess(
+	result: MarvinReadResult<MarvinItem[]>,
+	refresh?: CacheRefreshResult,
+) {
 	const { data, ...metadata } = result;
 	return success({
 		...metadata,
+		// Only present when the caller asked for a refresh. freshness/origin
+		// say where the answer came from; this says whether the refresh they
+		// requested actually ran, which is what tells them a cache hit is
+		// newly synchronized rather than a silent timeout that fell back.
+		...(refresh ? { refresh } : {}),
 		items: data.map(itemForTool),
 	});
 }
@@ -132,8 +141,9 @@ function failure(error: unknown) {
 export interface MarvinMcpServerOptions {
 	/** Asks the running Obsidian plugin to sync its incremental cache and
 	 * waits, bounded, before the read proceeds. Only wired when a cache path
-	 * is configured; the `refresh` tool parameter is a no-op without it. */
-	requestCacheRefresh?: () => Promise<void>;
+	 * is configured; the `refresh` tool parameter reports `skipped` without
+	 * it. */
+	requestCacheRefresh?: () => Promise<CacheRefreshResult>;
 }
 
 export function createMarvinMcpServer(
@@ -150,10 +160,21 @@ export function createMarvinMcpServer(
 		+ "to the normal read if Obsidian isn't running. Default false.",
 	);
 
-	const maybeRefresh = async (refresh: boolean | undefined) => {
-		if (refresh && options.requestCacheRefresh) {
-			await options.requestCacheRefresh();
+	const maybeRefresh = async (
+		refresh: boolean | undefined,
+	): Promise<CacheRefreshResult | undefined> => {
+		if (!refresh) {
+			return undefined;
 		}
+		if (!options.requestCacheRefresh) {
+			return {
+				requested: true,
+				outcome: "skipped",
+				waitedMs: 0,
+				reason: "no incremental cache is configured for this server",
+			};
+		}
+		return options.requestCacheRefresh();
 	};
 	const server = new McpServer({
 		name: "amazing-marvin",
@@ -216,8 +237,8 @@ export function createMarvinMcpServer(
 		},
 	}, async ({ refresh }) => {
 		try {
-			await maybeRefresh(refresh);
-			return readSuccess(await operations.getCategories());
+			const refreshResult = await maybeRefresh(refresh);
+			return readSuccess(await operations.getCategories(), refreshResult);
 		} catch (error) {
 			return failure(error);
 		}
@@ -237,8 +258,8 @@ export function createMarvinMcpServer(
 		},
 	}, async ({ parentId, refresh }) => {
 		try {
-			await maybeRefresh(refresh);
-			return readSuccess(await operations.getChildren(parentId));
+			const refreshResult = await maybeRefresh(refresh);
+			return readSuccess(await operations.getChildren(parentId), refreshResult);
 		} catch (error) {
 			return failure(error);
 		}
