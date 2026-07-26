@@ -289,6 +289,10 @@ The executable is:
 <repository>/packages/marvin-mcp/dist/server.js
 ```
 
+This is a Node stdio process, so it runs wherever your MCP host runs — a
+desktop or a server, never a phone. Everything below describes that machine;
+the Obsidian plugin's own mobile support is a separate matter.
+
 The server requires `AMAZING_MARVIN_API_TOKEN`, Marvin's **limited API token**.
 Do not copy that token into an MCP-host configuration file. Prefer a local
 launcher that reads your existing secret at startup and then executes the
@@ -394,8 +398,9 @@ surrounding `freshness`/`origin` fields still describe where the answer came
 from; this describes what the refresh did. The object is absent entirely when
 `refresh` wasn't requested.
 
-Incremental sync is desktop-only on the plugin side, so `refresh: true` will
-report `timed_out` or `skipped` when the vault it points at is open on mobile.
+A refresh is serviced by the Obsidian plugin on this same machine, so
+`refresh: true` reports `timed_out` when Obsidian isn't running here, or when
+it is running but the plugin has incremental sync disabled.
 
 ### Tool workflow
 

@@ -70,13 +70,15 @@ addresses the actual credential-entry concern rather than removing the feature.
    with `refresh: true`. Expect `skipped` with a reason about no cache being
    configured.
 
-### Desktop-only gating
+### Desktop-only gating (plugin only — the MCP server is a desktop Node process)
 
-6. On mobile, confirm the settings tab has no incremental sync section and that
-   the regular "Import categories and tasks" command still works.
-7. If you have a desktop vault syncing settings to mobile with incremental sync
-   enabled: confirm nothing on mobile is writing to the cache file or the
-   `AmazingMarvin` folder on its own.
+6. On mobile, confirm the settings tab has no incremental sync section, and that
+   the regular "Import categories and tasks" command still works there.
+7. If you have a desktop vault whose settings sync to mobile with incremental
+   sync enabled: on mobile, confirm `marvin-incremental-cache-v1.json` isn't
+   being created or updated. (The `AmazingMarvin` folder *will* still change on
+   mobile if you run the regular importer — that's expected; it's the cache
+   file and background syncing that should be absent.)
 
 ### Still uncovered
 
