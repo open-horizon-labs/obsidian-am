@@ -1,102 +1,78 @@
 ## What's in this beta
 
-Mostly a settings overhaul, plus the last round's sync fixes confirmed working
-by a real-vault test.
+One new capability for agent use, on top of beta5's settings overhaul.
 
-Incremental sync itself is unchanged since beta4: an opt-in alternative to the
-REST importer that reads Marvin's CouchDB `_changes` feed instead of rebuilding
-the whole imported tree. Off by default; the REST importer stays the default and
-fallback.
+## MCP reads can now ask for a fresh cache
 
-## Settings tab reorganized
+Until now the MCP server's use of the plugin's incremental cache was passive:
+it used the cache if Obsidian happened to have synced it, and otherwise fell
+through to REST. Fine for browsing, but not dependable right after you've
+changed something — freshness depended on focus/interval timing.
 
-A design critique pass found the tab had outgrown its structure — ~30 rows in
-one scroll, two of them floating above any heading at all. It's now grouped by
-what the setting actually *does* rather than by loose verbs:
+`marvin_categories` and `marvin_children` now accept an optional
+**`refresh: true`** parameter. When set, the MCP server asks the running
+plugin to sync and waits briefly (default 5s, via
+`AMAZING_MARVIN_REFRESH_TIMEOUT_MS`) before answering.
 
-- **Connection** — the API token, finally under a heading
-- **Category and project import** — unchanged
-- **Today's tasks** / **Automatic refresh** — split apart. Background file
-  rewriting was previously filed under what read like a display preference; it
-  now has its own heading, because it's the highest-consequence thing here.
-- **How imported tasks are written** (was "Task formatting")
-- **Sending changes to Marvin** (was "Task creation") — now also holds "Mark
-  tasks done in Marvin," which used to sit at the very top next to the API
-  token as if it were part of setup
-- **Advanced: incremental sync** and **Advanced: local server**, both
-  collapsed, both at the bottom
+It's a **per-call parameter, defaulting to false**, because the caller is the
+one who knows whether a given question needs current data ("did my task
+land?") versus tolerating a cached answer ("what's in Work?"). Passive,
+zero-latency reads stay the default.
 
-Specific fixes you may notice:
+**How it works, and why:** the MCP server drops a small request file next to
+the cache file it already reads; the plugin polls for it, syncs, and clears
+it. A file rather than a socket, deliberately — the plugin keeps sole custody
+of the database credentials under either design, but this way nothing opens an
+inbound network listener on your note-taking app and there's no shared secret
+between the two processes.
 
-- **"Tasks to Show" is now "Tasks to include."** It collided with "Show Due
-  Date" 170 lines further down — one picks which *tasks* appear, the other
-  which *date fields* appear, and the old names read as contradicting each
-  other.
-- **The three bare "Show Due/Start/Scheduled Date" toggles are now one "Dates
-  to show" row** with labeled checkboxes. They were the only rows in the whole
-  tab with no description.
-- **Settings that only apply to one metadata format now grey out** instead of
-  sitting there looking active. Same for the label prefix when labels-as-tags
-  is off. Nothing new was hidden — a row that vanishes is a row nobody knows
-  exists.
-- **Two more instances of the bug that caused "there's no place to put the
-  creds"**: adding/removing an import root rebuilt the entire tab (collapsing
-  both advanced sections), and a *background* sync could rebuild the tab while
-  you were mid-typing in a credential field. Both now update in place.
-- **"Remove" on an import root asks for a confirming second click** — it
-  silently un-imports a whole subtree, and the much safer "Reset cache" already
-  had that guard.
-- Sentence case throughout, two copy errors fixed, and an invalid refresh
-  interval now tells you it was rejected instead of silently ignoring you.
+**It's best-effort, not a guarantee.** If Obsidian isn't running, the plugin
+is disabled, or the sync fails, the wait ends and the read answers from cache
+or REST exactly as before. Repeated calls also won't pile up waiting on a
+plugin that isn't answering — an unclaimed request file is treated as evidence
+nothing is listening, so subsequent calls skip the wait until the plugin picks
+up again.
 
-## Incremental sync is now desktop-only
+## Reminder from beta5: settings were reorganized
 
-The settings section is gated to desktop, matching the local server section.
-It asks for full-database credentials, and a phone — autocorrecting keyboard,
-no reveal toggle on the password field — is the wrong place to type one.
-
-Note: this hides the *UI*, it doesn't disable an already-configured sync. If
-you set it up on desktop and your settings sync to mobile, the sync still runs
-there. Say so if you'd rather it didn't.
-
-## Confirmed working since beta4
-
-A tester verified the whole path in a real vault, which retires the "never run
-in a real Obsidian vault" caveat these notes carried for four releases:
-
-- The beta3 MCP regression is gone — `marvin_today`, `marvin_due`,
-  `marvin_labels`, `marvin_create_task`, and `marvin_mark_done` all work with a
-  cache path configured.
-- A task created via MCP appeared in the cache *and* in `AmazingMarvin/Inbox.md`,
-  then disappeared from both after completion and sync.
-- Window-focus auto-sync works without touching "Sync now" — about a 20-second
-  round trip, both directions.
+The settings tab is now grouped by what each setting does rather than by loose
+verbs — **Connection**, **Category and project import**, **Today's tasks**,
+**Automatic refresh**, **How imported tasks are written**, **Sending changes
+to Marvin**, then two collapsed **Advanced** sections. Incremental sync is
+desktop-only. See the beta5 notes for the full list.
 
 ## How to test
 
-### Settings (new this round)
+### The new refresh parameter
 
-1. Open the plugin settings and read down the tab. Does the grouping make sense?
-   Does anything feel like it's under the wrong heading?
-2. Expand "Advanced: incremental sync," toggle it on, and confirm the four
-   credential fields enable in place without the section collapsing.
-3. With the settings tab open and the advanced section expanded, wait for a
-   background sync (or switch focus away and back). The section should stay open
-   and keep your cursor where it was.
-4. Switch "Items to import" to "Selected roots," add and remove a root, and
-   confirm the advanced sections stay expanded throughout.
-5. Set "Metadata format" to a Tasks format and confirm "Put task title first"
-   and "Date link format" grey out.
-6. Type nonsense into "Refresh interval" and confirm it tells you it was
-   rejected.
+1. Update your MCP checkout to this tag and rebuild — the MCP server is built
+   from this repo, not from the BRAT-installed plugin:
+   ```sh
+   git -C /path/to/obsidian-am fetch --tags
+   git -C /path/to/obsidian-am checkout 0.11.0-beta6
+   npm --prefix /path/to/obsidian-am ci
+   npm --prefix /path/to/obsidian-am run build
+   ```
+2. With Obsidian running and incremental sync configured, create a task in
+   Marvin (or via `marvin_create_task`), then immediately call
+   `marvin_children` with `refresh: true` for its parent. The new task should
+   be there without you touching "Sync now" or waiting out the interval.
+3. Call the same tool **without** `refresh` and confirm it still answers
+   instantly from cache.
+4. **Quit Obsidian entirely**, then call with `refresh: true` a few times in a
+   row. The first call should wait out the timeout at most once; subsequent
+   calls should return promptly rather than each waiting the full 5s, and all
+   of them should still answer correctly via REST.
+5. Restart Obsidian and confirm `refresh: true` starts working again without
+   any intervention.
 
 ### Still uncovered
 
-Rename / move / delete propagation (MCP doesn't expose those routes),
-reset-cache rehydration, and disabling incremental sync then running the regular
-importer.
+Rename / move / delete propagation (the MCP doesn't expose those routes),
+reset-cache rehydration, and disabling incremental sync then running the
+regular importer.
 
 ## Feedback
 
-[Issue #55](https://github.com/open-horizon-labs/obsidian-am/issues/55) for test
-results; a new issue for anything that looks like a distinct bug.
+[Issue #55](https://github.com/open-horizon-labs/obsidian-am/issues/55) for
+test results; a new issue for anything that looks like a distinct bug.
