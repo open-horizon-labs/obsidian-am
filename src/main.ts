@@ -808,7 +808,11 @@ export default class AmazingMarvinPlugin extends Plugin {
 			// not just the manual "Sync now" button — otherwise the Status
 			// line in an already-open settings tab goes stale until the
 			// user does something to force a re-render.
-			this.settingsTab?.display();
+			// Targeted status-row update, not a full display() rebuild: this
+			// fires on automatic syncs too (focus/interval/startup/online),
+			// and rebuilding the tab would collapse the advanced sections
+			// and drop focus out of a field being typed into.
+			this.settingsTab?.refreshIncrementalStatus();
 		}
 	}
 
