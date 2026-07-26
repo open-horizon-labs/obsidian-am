@@ -82,7 +82,19 @@ export function createCachePreferringOperations(
 	options: IncrementalCacheReaderOptions,
 ): MarvinOperations {
 	return {
-		...fallback,
+		// Explicit delegation, not a `...fallback` spread: fallback is
+		// typically a MarvinRouter class instance, whose methods live on
+		// the prototype. Object spread only copies own enumerable
+		// properties, so `{...fallback}` silently drops every method
+		// (getTodayItems, getDueItems, getLabels, addTask, markDone) —
+		// confirmed as a real regression (issue #81): every MCP tool
+		// except marvin_categories/marvin_children broke the moment a
+		// cache path was configured, not just an edge case.
+		getTodayItems: (date) => fallback.getTodayItems(date),
+		getDueItems: (by) => fallback.getDueItems(by),
+		getLabels: () => fallback.getLabels(),
+		addTask: (task) => fallback.addTask(task),
+		markDone: (itemId, timeZoneOffset) => fallback.markDone(itemId, timeZoneOffset),
 		async getCategories() {
 			const state = await loadFreshState(options);
 			if (state) {
