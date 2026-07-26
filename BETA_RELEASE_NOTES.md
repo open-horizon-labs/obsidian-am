@@ -1,63 +1,44 @@
-## Completed tasks stay in your daily note
+## Fixes the plugin author shown in Obsidian
 
-If you checked off a task in the managed Today region, the next refresh deleted
-the line. Your daily note recorded only what you *hadn't* finished — which is
-backwards for a record of the day.
+Every beta since the org rename has credited **Cloud Atlas** in Obsidian's
+plugin list, with the old cloud-atlas.ai link. Stable releases were already
+correct — only betas were wrong, which is why it went unnoticed.
 
-Completed tasks now stay, checked off, in the position they were already in.
+The cause: the rename commit updated `manifest.json`, but the beta build ships
+`manifest-beta.json`, and that file kept the old name. It now matches, and CI
+fails if the two manifests ever disagree on anything except the version they're
+releasing, so this can't drift again.
 
-### Why it was happening
+Nothing else changed in this release — same functionality as beta9.
 
-Marvin's Today and due reads only return **open** work. `/dueItems` is
-documented as "open", `/todayItems` has no parameter for completed items, and
-there is no endpoint at all that lists what you completed on a given day. So
-once you checked a task, the refresh saw it missing from the read and removed
-the line. The note renderer already knew how to draw a checked box — the data
-just never survived long enough to reach it.
+### Why the plugin folder still says "cloudatlas"
 
-### What it does now
-
-A checked Marvin line already in the region is kept, verbatim, when the current
-read no longer returns it, and it holds its original position rather than
-sliding to the bottom.
-
-Kept deliberately narrow, because over-preserving would pin stale work into
-notes forever:
-
-- **Only checked lines are kept.** An unchecked task Marvin no longer returns
-  has genuinely left your Today list — deleted, rescheduled, or unscheduled —
-  so it still disappears, as before.
-- **Marvin still wins.** If you un-complete a task in Marvin, it renders as open
-  again on the next refresh rather than staying stuck as a checked line.
-- **Nothing accumulates across days.** Preservation is scoped to each note's own
-  dated region.
-
-Needs no new credentials, and works whether or not you use incremental sync.
-
-### One case this doesn't cover yet
-
-A task you completed **in Marvin's app** that had never appeared in your note
-won't show up — there's no line in the note to preserve. The CouchDB cache does
-have completed tasks with their completion timestamps and could fill that gap;
-it currently discards them. Worth doing as a follow-up if you find yourself
-wanting it, and it'd be a second real payoff for the database credential beyond
-avoiding throttling.
+The plugin's internal `id` is still `cloudatlas-o-am`, so the folder under
+`.obsidian/plugins/` keeps the old name. That's deliberate: the id is the folder
+name, so changing it would orphan your install — settings, and the incremental
+sync cache, all live in that folder, and you'd get a fresh unconfigured plugin.
+It's also the handle other plugins and scripts use to reach this one's API. Not
+worth breaking working installs over an identifier nobody sees.
 
 ## How to test
 
-1. Install `0.11.0-beta9` via BRAT.
-2. Open today's daily note with an initialized Today region and some open tasks.
-3. Check one off in Obsidian. Wait for the automatic refresh (window focus, or
-   about a minute) or run "Refresh today's tasks".
-4. **The task should still be there, checked, in the same spot.** Previously it
-   vanished.
-5. Let several refreshes run. The note should stop changing — no duplicates, no
-   drift.
-6. Complete a different task in Marvin's own app instead of in Obsidian. It
-   should also stay in the note, checked.
-7. Un-complete that task in Marvin. It should go back to an open checkbox.
-8. In Marvin, reschedule a still-open task to a different day. It **should**
-   disappear from today's note — that's intended, not a regression.
+1. Update to `0.11.0-beta10` via BRAT.
+2. Open **Settings → Community plugins** and confirm "Amazing Marvin
+   Integration" now shows **Open Horizon Labs** as the author, linking to
+   openhorizonlabs.ai.
+
+## Carried over from beta9
+
+Completed tasks stay in the managed Today region instead of being deleted on the
+next refresh. If you haven't exercised that yet, it's the more interesting thing
+to test:
+
+- Check a task off in Obsidian, let a refresh run, and confirm the line stays
+  put and checked rather than vanishing.
+- Complete one in Marvin's app instead — same result.
+- Un-complete it in Marvin and confirm it goes back to an open checkbox.
+- Reschedule a still-open task to another day in Marvin; it **should** leave
+  today's note.
 
 ### Still uncovered
 
@@ -67,5 +48,4 @@ importer.
 ## Feedback
 
 [Issue #55](https://github.com/open-horizon-labs/obsidian-am/issues/55) for
-incremental-sync results. This Today-region change is better discussed on a new
-issue if something's off, since it's independent of the sync work.
+incremental-sync results; a new issue for anything else.
