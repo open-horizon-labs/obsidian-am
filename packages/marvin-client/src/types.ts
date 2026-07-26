@@ -84,6 +84,49 @@ export interface Label extends BaseMarvinItem {
 export type TaskOrProject = Task | Project;
 export type MarvinItem = Task | Project | Category;
 
+/** Fields /api/addProject documents. Deliberately not `AddTaskRequest`:
+ * projects carry `priority`, and do not support the `plannedWeek` /
+ * `plannedMonth` / `isStarred` fields tasks do. */
+export interface AddProjectRequest {
+	title: string;
+	done?: boolean;
+	day?: string;
+	parentId?: string;
+	labelIds?: string[];
+	firstScheduled?: string;
+	rank?: number;
+	dailySection?: string;
+	bonusSection?: string;
+	customSection?: string;
+	timeBlockSection?: string;
+	note?: string;
+	dueDate?: string;
+	timeEstimate?: number;
+	isReward?: boolean;
+	priority?: "high" | "mid" | "low";
+	isFrogged?: boolean | number;
+	rewardPoints?: number;
+	rewardId?: string;
+	backburner?: boolean;
+	reviewDate?: string;
+	itemSnoozeTime?: number;
+	permaSnoozeTime?: number;
+	timeZoneOffset?: number;
+}
+
+/** What /api/addProject actually gives back. Marvin's docs say the new
+ * document's `_id` and `_rev` "will be included in the response in the
+ * future" — so today a successful create may return neither. Modeled as
+ * optional rather than required: the project exists either way, and
+ * rejecting the response would push a caller toward retrying a write that
+ * already succeeded. */
+export interface AddProjectResult {
+	project?: Project;
+	/** True when the response carried no usable project document, so the
+	 * caller knows the create succeeded but the ID must be looked up. */
+	idUnavailable: boolean;
+}
+
 export interface AddTaskRequest {
 	title: string;
 	done?: boolean;

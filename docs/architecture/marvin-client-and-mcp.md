@@ -77,6 +77,32 @@ Its provenance and MIT license are retained in
 Only Amazing Marvin's limited `X-API-Token` endpoints are in scope. Full-access
 CouchDB operations are intentionally absent.
 
+### Why edit and delete are not exposed
+
+The limited API has no update or delete endpoint. Its writes are `addTask`,
+`addProject`, `addEvent`, `markDone`, time tracking, reward points, reminders,
+and `updateHabit` — nothing that renames an item, reparents it, or changes its
+dates. Those need `/api/doc/update` and `/api/doc/delete`, which require a
+third credential (`X-Full-Access-Token`) beyond the API token and the database
+credentials, and which Marvin's own documentation warns about directly:
+updating a document with the wrong shape "might cause Marvin to crash on
+startup," and deleting through the API bypasses Marvin's client-side Trash so
+"you won't be able to recover any documents deleted in this way."
+
+A tool that can permanently destroy unrecoverable user data, or corrupt the
+app's startup state, is not something to hand an autonomous caller because it
+would round out a CRUD surface. Editing and deleting stay in Amazing Marvin's
+own clients, which is also where users already do them.
+
+This is a scope decision, not a missing feature: reopening it means writing an
+evaluation for the third credential the way
+`docs/evaluations/0053-amazing-marvin-client.md` did for the client fork.
+
+Note for test planning: verifying that renames, moves, and deletions propagate
+into the vault does **not** require MCP routes for them. Perform the operation
+in Amazing Marvin and watch the plugin's incremental sync pick it up — which is
+also how real users do it.
+
 The MCP starts only a stdio transport; it does not construct a Hono HTTP
 server, serve static files, or expose a network listener. Dependency audits may
 still report the SDK's transitive Hono adapter. Treat that report as an

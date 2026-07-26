@@ -9,6 +9,8 @@ import {
 	asMarvinError,
 } from "./errors.js";
 import type {
+	AddProjectRequest,
+	AddProjectResult,
 	AddTaskRequest,
 	Category,
 	Label,
@@ -158,6 +160,20 @@ export class MarvinRouter {
 		}
 	}
 
+	async addProject(project: AddProjectRequest): Promise<AddProjectResult> {
+		try {
+			return await this.runPublic(
+				"add project",
+				(client) => client.addProject(project),
+			);
+		} finally {
+			// A new project changes the category/project tree, so the cached
+			// categories list and any children list it could appear under are
+			// both stale now.
+			this.invalidateProjectLists();
+		}
+	}
+
 	async markDone(itemId: string, timeZoneOffset?: number): Promise<MarkDoneResult> {
 		try {
 			return await this.runPublic(
@@ -175,6 +191,10 @@ export class MarvinRouter {
 
 	private invalidateTaskLists(): void {
 		this.cache.invalidatePrefixes(["today:", "due:", "children:"]);
+	}
+
+	private invalidateProjectLists(): void {
+		this.cache.invalidatePrefixes(["categories", "children:"]);
 	}
 
 	private async readThrough<T>(
