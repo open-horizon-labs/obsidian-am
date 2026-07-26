@@ -1,6 +1,7 @@
 import {
 	Notice,
 	type Editor,
+	Platform,
 	Plugin,
 	TFile,
 	TFolder,
@@ -691,6 +692,18 @@ export default class AmazingMarvinPlugin extends Plugin {
 	}
 
 	private getOrCreateIncrementalCache(): IncrementalMarvinCache | undefined {
+		// Desktop-only at the runtime, not just in settings. The settings
+		// section is desktop-gated because full-database credentials are the
+		// wrong thing to type on a phone keyboard — but plugin settings sync
+		// between devices, so gating only the UI left mobile running a
+		// background sync with those credentials and no way to see its
+		// status, read its errors, sync manually, or reset its cache. An
+		// invisible, uncontrollable background process is worse than not
+		// having the optimization: mobile falls back to the REST importer,
+		// which works there and stays the default everywhere anyway.
+		if (!Platform.isDesktopApp) {
+			return undefined;
+		}
 		if (!this.settings.incrementalSyncEnabled) {
 			return undefined;
 		}
@@ -738,7 +751,10 @@ export default class AmazingMarvinPlugin extends Plugin {
 	 * waiting on it, not a background tick. Backoff is still respected, so a
 	 * failing endpoint can't be hammered through this path. */
 	private async serveIncrementalSyncRequest(): Promise<void> {
-		if (!this.settings.incrementalSyncEnabled) {
+		// Checked here as well as in getOrCreateIncrementalCache so mobile
+		// isn't stat-ing for a request file every couple of seconds that it
+		// could never service anyway.
+		if (!Platform.isDesktopApp || !this.settings.incrementalSyncEnabled) {
 			return;
 		}
 		const store = new ObsidianIncrementalCacheStore(
