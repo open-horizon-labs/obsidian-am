@@ -94,6 +94,7 @@ export function createCachePreferringOperations(
 		getDueItems: (by) => fallback.getDueItems(by),
 		getLabels: () => fallback.getLabels(),
 		addTask: (task) => fallback.addTask(task),
+		addProject: (project) => fallback.addProject(project),
 		markDone: (itemId, timeZoneOffset) => fallback.markDone(itemId, timeZoneOffset),
 		async getCategories() {
 			const state = await loadFreshState(options);

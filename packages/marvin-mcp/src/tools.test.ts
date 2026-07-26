@@ -49,6 +49,7 @@ function operations(overrides: Partial<MarvinOperations> = {}): MarvinOperations
 			title: input.title,
 			done: false,
 		}),
+		addProject: async () => ({ idUnavailable: true }),
 		markDone: async () => ({ success: true }),
 		...overrides,
 	};
@@ -98,6 +99,7 @@ describe("Amazing Marvin MCP", () => {
 		expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
 			"marvin_categories",
 			"marvin_children",
+			"marvin_create_project",
 			"marvin_create_task",
 			"marvin_due",
 			"marvin_labels",
@@ -321,6 +323,91 @@ describe("Amazing Marvin MCP", () => {
 		expect(
 			(result.structuredContent as { refresh: { reason?: string } }).refresh.reason,
 		).toContain("no incremental cache");
+	});
+
+
+	it("creates a project and returns its identified document", async () => {
+		const calls: unknown[] = [];
+		const client = await connect(operations({
+			addProject: async (input) => {
+				calls.push(input);
+				return {
+					project: {
+						_id: "project-new",
+						title: input.title,
+						type: "project" as const,
+						// Conditional spread, not `parentId: input.parentId`:
+						// exactOptionalPropertyTypes rejects an explicit
+						// undefined for an optional property.
+						...(input.parentId === undefined
+							? {}
+							: { parentId: input.parentId }),
+					},
+					idUnavailable: false as const,
+				};
+			},
+		}));
+
+		const result = await client.callTool({
+			name: "marvin_create_project",
+			arguments: {
+				title: "Launch plan",
+				parentId: "project-1",
+				priority: "high",
+			},
+		});
+
+		expect(result.structuredContent).toMatchObject({
+			created: true,
+			project: {
+				id: "project-new",
+				title: "Launch plan",
+				type: "project",
+				deepLink: "https://app.amazingmarvin.com/#p=project-new",
+			},
+		});
+		expect(calls).toMatchObject([{
+			title: "Launch plan",
+			parentId: "project-1",
+			priority: "high",
+		}]);
+	});
+
+	it("reports a created project whose ID Marvin did not return, without erroring", async () => {
+		// Marvin documents that addProject will carry the new _id/_rev "in the
+		// future", so a success today can come back without one. Treating that
+		// as a failure would invite a retry that creates a second project.
+		const client = await connect(operations({
+			addProject: async () => ({ idUnavailable: true }),
+		}));
+
+		const result = await client.callTool({
+			name: "marvin_create_project",
+			arguments: { title: "Launch plan" },
+		});
+
+		expect(result.isError ?? false).toBe(false);
+		expect(result.structuredContent).toMatchObject({
+			created: true,
+			idUnavailable: true,
+		});
+		expect(
+			(result.structuredContent as { note: string }).note,
+		).toContain("would create a duplicate");
+	});
+
+	it("rejects a malformed project date in the structured error envelope", async () => {
+		const client = await connect(operations());
+
+		const result = await client.callTool({
+			name: "marvin_create_project",
+			arguments: { title: "Launch plan", dueDate: "nope" },
+		});
+
+		expect(result.isError).toBe(true);
+		expect(result.structuredContent).toEqual({
+			error: { kind: "input", field: "dueDate", message: "Use YYYY-MM-DD" },
+		});
 	});
 
 });

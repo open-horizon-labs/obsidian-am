@@ -1,5 +1,7 @@
 import { asMarvinError, MarvinError } from "./errors.js";
 import type {
+	AddProjectRequest,
+	AddProjectResult,
 	AddTaskRequest,
 	Category,
 	Label,
@@ -148,6 +150,31 @@ export class MarvinApiClient {
 			...task,
 		});
 		return requireTask(value, this.context("add task", endpoint, "POST"));
+	}
+
+	async addProject(project: AddProjectRequest): Promise<AddProjectResult> {
+		const endpoint = "/addProject";
+		const value = await this.requestJson("add project", endpoint, "POST", {
+			done: false,
+			...project,
+		});
+		// Not requireTask()'s strict _id check. Marvin documents that
+		// addProject's response will carry _id/_rev "in the future", so a
+		// successful create today can come back without them. Throwing here
+		// would report a failure for a project that exists, and invite a
+		// retry that creates a second one.
+		if (
+			typeof value === "object"
+			&& value !== null
+			&& typeof (value as Partial<Project>)._id === "string"
+			&& typeof (value as Partial<Project>).title === "string"
+		) {
+			return {
+				project: { ...(value as Project), type: "project" },
+				idUnavailable: false,
+			};
+		}
+		return { idUnavailable: true };
 	}
 
 	async markDone(itemId: string, timeZoneOffset?: number): Promise<MarkDoneResult> {

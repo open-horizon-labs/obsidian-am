@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { MarkDoneResult, MarvinReadResult, Task, TaskOrProject } from "@open-horizon/marvin-client";
+import type { AddProjectResult, MarkDoneResult, MarvinReadResult, Task, TaskOrProject } from "@open-horizon/marvin-client";
 
 import { createCachePreferringOperations } from "./incrementalCacheOperations.js";
 import type { MarvinOperations } from "./tools.js";
@@ -31,6 +31,7 @@ class FakeMarvinRouter implements MarvinOperations {
 	async getChildren(parentId: string) { return this.getChildrenMock(parentId); }
 	async getLabels() { return { ...restResult, data: [] }; }
 	async addTask(): Promise<Task> { throw new Error("not used in these tests"); }
+	async addProject(): Promise<AddProjectResult> { throw new Error("not used in these tests"); }
 	async markDone(): Promise<MarkDoneResult> { throw new Error("not used in these tests"); }
 }
 

@@ -19,6 +19,7 @@ export type MarvinOperations = Pick<
 	| "getChildren"
 	| "getLabels"
 	| "addTask"
+	| "addProject"
 	| "markDone"
 >;
 
@@ -320,6 +321,70 @@ export function createMarvinMcpServer(
 				...(input.timeEstimate === undefined ? {} : { timeEstimate: input.timeEstimate }),
 			});
 			return success({ task: itemForTool(task) });
+		} catch (error) {
+			return failure(error);
+		}
+	});
+
+	server.registerTool("marvin_create_project", {
+		title: "Create Amazing Marvin Project",
+		description:
+			"Create one project in Amazing Marvin with the limited API token. "
+			+ "Use this to make a container before creating tasks inside it.",
+		inputSchema: {
+			title: z.string().trim().min(1).describe("Project title"),
+			parentId: z.string().trim().min(1).optional()
+				.describe("Parent category/project ID from marvin_categories"),
+			labelIds: z.array(z.string().trim().min(1)).optional()
+				.describe("Stable IDs returned by marvin_labels"),
+			day: dateSchema,
+			dueDate: dateSchema,
+			note: z.string().optional(),
+			priority: z.enum(["high", "mid", "low"]).optional()
+				.describe("Projects support priority; tasks do not"),
+			timeEstimate: z.number().int().nonnegative().optional()
+				.describe("Estimated duration in milliseconds"),
+		},
+		annotations: {
+			readOnlyHint: false,
+			destructiveHint: false,
+			idempotentHint: false,
+			openWorldHint: true,
+		},
+	}, async (input) => {
+		try {
+			const day = requireOptionalDate(input.day, "day");
+			const dueDate = requireOptionalDate(input.dueDate, "dueDate");
+			const result = await operations.addProject({
+				title: input.title,
+				timeZoneOffset: new Date().getTimezoneOffset() * -1,
+				...(input.parentId === undefined ? {} : { parentId: input.parentId }),
+				...(input.labelIds === undefined ? {} : { labelIds: input.labelIds }),
+				...(day === undefined ? {} : { day }),
+				...(dueDate === undefined ? {} : { dueDate }),
+				...(input.note === undefined ? {} : { note: input.note }),
+				...(input.priority === undefined ? {} : { priority: input.priority }),
+				...(input.timeEstimate === undefined ? {} : { timeEstimate: input.timeEstimate }),
+			});
+			// Marvin documents that addProject will return the new _id/_rev
+			// "in the future", so today a success can come back without one.
+			// Reported as created-but-unidentified rather than as an error:
+			// the project exists, and a caller that treats this as a failure
+			// would retry and create a duplicate.
+			if (result.project) {
+				return success({
+					created: true,
+					project: itemForTool(result.project),
+				});
+			}
+			return success({
+				created: true,
+				idUnavailable: true,
+				note:
+					"Amazing Marvin did not return the new project's ID. The project "
+					+ "was created; call marvin_categories to find it rather than "
+					+ "retrying this call, which would create a duplicate.",
+			});
 		} catch (error) {
 			return failure(error);
 		}

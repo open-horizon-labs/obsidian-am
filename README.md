@@ -410,6 +410,7 @@ it is running but the plugin has incremental sync disabled.
 | `marvin_children` | Read direct tasks/projects under a discovered parent ID. |
 | `marvin_labels` | Discover stable label IDs before task creation. |
 | `marvin_today` / `marvin_due` | Read scheduled or due work for an optional `YYYY-MM-DD` date. |
+| `marvin_create_project` | Create a project to hold tasks, before creating them. |
 | `marvin_create_task` | Create a task, optionally with `parentId`, dates, labels, note, and estimate. |
 | `marvin_mark_done` | Complete a task or project by stable ID. |
 
