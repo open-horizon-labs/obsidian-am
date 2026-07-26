@@ -2,13 +2,14 @@
 
 This plugin brings Amazing Marvin tasks, categories, and projects into
 [Obsidian](https://obsidian.md) without treating the vault as disposable. It
-also includes a companion MCP server for agents that need Marvin access
-without mutating an Obsidian vault.
+also includes an MCP server for agents that need Marvin access without
+mutating an Obsidian vault. That server runs independently of the plugin and is
+expected to be spun out into its own repository.
 
 ## Use Marvin, Obsidian, and an agent together
 
 Amazing Marvin remains the task system of record. The Obsidian plugin projects
-that work into notes you can use for context and execution. The companion MCP
+that work into notes you can use for context and execution. The MCP server
 lets an agent work directly with Marvin: discover a project by stable ID, read
 its work, create a task, or complete it.
 
@@ -17,6 +18,11 @@ regions, and source-note associations. Use the MCP for Marvin-only work. The
 two surfaces share the same client, local-first read behavior, cache rules, and
 error model. Run the relevant plugin refresh or import to project a task an
 agent creates through MCP into the vault.
+
+The two are independent: **the MCP server works without the plugin and without
+Obsidian**, and the plugin works without the MCP server. They're in one
+repository today because they share a Marvin client; the server is expected to
+be spun out on its own once it settles.
 
 ## Plugin overview
 
@@ -38,8 +44,9 @@ The Amazing Marvin Plugin provides a way to bring your tasks and project structu
 - **Refreshable daily notes**: A bounded Today region keeps due and scheduled
   tasks current without rerunning a template or overwriting the rest of a note.
 - **Agent-ready API**: Templater and other in-Obsidian automation can use a
-  typed API with idempotent source/action task creation. The companion MCP
-  shares the Marvin client for Marvin-only workflows.
+  typed API with idempotent source/action task creation. The MCP server
+  shares the Marvin client for Marvin-only workflows, and runs with or without
+  the plugin.
 
 ## Usage Instructions
 
@@ -117,10 +124,15 @@ To create a task:
 Run `Amazing Marvin Integration: Refresh today's tasks` from a daily note. On
 the first run, the plugin adopts existing Marvin checklist entries under
 `## Today's tasks` as the morning set and surrounds the recognized generated
-task content with managed HTML-comment markers. Copy completed legacy task
-history out before that first refresh: current Marvin reads may not return it,
-so it is not retained by the live projection. Content outside the recognized
+task content with managed HTML-comment markers. Content outside the recognized
 legacy checklist and later managed region is preserved.
+
+Once the managed region exists, completed tasks stay in it: a checked Marvin
+line is kept even after Marvin's reads stop returning it, so the note records
+what the day contained rather than only what is still outstanding. The
+exception is that **one-time adoption** of an older note, which builds the
+region from Marvin's current reads and so cannot recover already-completed
+history — copy that out before the first refresh.
 
 Later scheduled and due tasks appear under `### Added since morning`. Results
 are deduplicated by Marvin task ID, completion state is rerendered from Marvin,
@@ -252,7 +264,8 @@ open `app.amazingmarvin.com` and `help.amazingmarvin.com`; API requests use
 `serv.amazingmarvin.com` or the configured local server. Keep the token in
 plugin settings or a local secret mechanism, never in a shared note.
 
-The companion MCP is a separate local stdio process. It can operate on Marvin,
+The MCP server is a separate local stdio process, usable without the plugin.
+It can operate on Marvin,
 but it does not edit the vault; use the plugin's in-Obsidian API when a
 workflow must both create a task and record its source note.
 
@@ -268,13 +281,25 @@ workflow must both create a task and record its source note.
 
 For more detailed development instructions, refer to the [sample plugin](https://github.com/obsidianmd/obsidian-sample-plugin) provided by Obsidian.
 
-## Companion MCP server
+## MCP server
 
 The repository includes a local **stdio MCP server** for direct agent access
 to Marvin. It is the right surface for reading Marvin, discovering a parent
 ID, creating a task, or completing a task. It never edits an Obsidian vault.
 Use the plugin API above when an operation must also persist a source/action
 association or update a managed note.
+
+> **This server does not require the Obsidian plugin, or Obsidian at all.** It
+> talks to Amazing Marvin with the limited API token and nothing else. Reading
+> the plugin's incremental cache (below) is an optional optimization for people
+> who happen to run both; without it the server works exactly the same, just
+> with a REST call where a cached read would have served.
+>
+> **It will be spun out into its own repository.** It lives here for now because
+> the plugin and the server share one Marvin client, and developing them
+> together kept that contract honest while it settled. Expect it to move once
+> it's stable enough to version independently. Nothing about how you configure
+> or use it should change, but the clone path will.
 
 ### Build and register it
 
