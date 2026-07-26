@@ -358,6 +358,27 @@ result envelope: a cache hit reports `"freshness": "cached"` with
 either the path is wrong, the cache is stale, or the build predates this
 feature.
 
+##### Asking for a fresh cache on a specific call
+
+By default this reading is passive: the cache is used if the plugin already
+happened to sync it, and otherwise the read falls through to REST. When a
+particular question needs current data, `marvin_categories` and
+`marvin_children` accept an optional `refresh: true` parameter. That asks the
+running plugin to sync first and waits briefly before answering.
+
+It works by dropping a small request file next to the cache file, which the
+plugin polls for and services — so the plugin keeps sole custody of the
+database credentials, and nothing here opens a network listener or needs a
+shared secret. Set `AMAZING_MARVIN_REFRESH_TIMEOUT_MS` to change how long a
+refresh-requesting read waits (default 5 seconds).
+
+The parameter defaults to `false`, and it is a best-effort nicety rather than
+a guarantee: if Obsidian isn't running, the plugin is disabled, or the sync
+fails, the wait ends and the read answers from cache or REST as it otherwise
+would. Repeated calls don't stack up waiting on a plugin that isn't
+answering — an unclaimed request file is treated as evidence that nothing is
+listening, and the next call skips the wait until the plugin picks up again.
+
 ### Tool workflow
 
 | Tool | Use it for |

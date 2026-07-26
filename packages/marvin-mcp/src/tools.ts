@@ -129,9 +129,32 @@ function failure(error: unknown) {
 	};
 }
 
+export interface MarvinMcpServerOptions {
+	/** Asks the running Obsidian plugin to sync its incremental cache and
+	 * waits, bounded, before the read proceeds. Only wired when a cache path
+	 * is configured; the `refresh` tool parameter is a no-op without it. */
+	requestCacheRefresh?: () => Promise<void>;
+}
+
 export function createMarvinMcpServer(
 	operations: MarvinOperations,
+	options: MarvinMcpServerOptions = {},
 ): McpServer {
+	// Exposed as a per-call parameter rather than a server-wide setting: the
+	// caller knows whether this particular question needs current data
+	// ("did my task land?") or tolerates a cached answer ("what's in Work?").
+	// Defaults to false so the passive, zero-latency read stays the norm.
+	const refreshSchema = z.boolean().optional().describe(
+		"Ask Obsidian to sync its Marvin cache first and wait briefly. Only "
+		+ "affects setups using the plugin's incremental cache; falls through "
+		+ "to the normal read if Obsidian isn't running. Default false.",
+	);
+
+	const maybeRefresh = async (refresh: boolean | undefined) => {
+		if (refresh && options.requestCacheRefresh) {
+			await options.requestCacheRefresh();
+		}
+	};
 	const server = new McpServer({
 		name: "amazing-marvin",
 		version: "0.1.0",
@@ -184,13 +207,16 @@ export function createMarvinMcpServer(
 	server.registerTool("marvin_categories", {
 		title: "Amazing Marvin Categories and Projects",
 		description: "Read stable category/project IDs and their parent hierarchy.",
-		inputSchema: {},
+		inputSchema: {
+			refresh: refreshSchema,
+		},
 		annotations: {
 			readOnlyHint: true,
 			openWorldHint: true,
 		},
-	}, async () => {
+	}, async ({ refresh }) => {
 		try {
+			await maybeRefresh(refresh);
 			return readSuccess(await operations.getCategories());
 		} catch (error) {
 			return failure(error);
@@ -203,13 +229,15 @@ export function createMarvinMcpServer(
 		inputSchema: {
 			parentId: z.string().trim().min(1)
 				.describe("Category/project ID, or unassigned for Inbox"),
+			refresh: refreshSchema,
 		},
 		annotations: {
 			readOnlyHint: true,
 			openWorldHint: true,
 		},
-	}, async ({ parentId }) => {
+	}, async ({ parentId, refresh }) => {
 		try {
+			await maybeRefresh(refresh);
 			return readSuccess(await operations.getChildren(parentId));
 		} catch (error) {
 			return failure(error);
