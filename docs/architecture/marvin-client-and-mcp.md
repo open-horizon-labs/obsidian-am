@@ -77,6 +77,38 @@ Its provenance and MIT license are retained in
 Only Amazing Marvin's limited `X-API-Token` endpoints are in scope. Full-access
 CouchDB operations are intentionally absent.
 
+### Cache holds only derived data
+
+Everything in `marvin-incremental-cache-v1.json` must be reconstructible by
+re-reading Amazing Marvin. Nothing unique lives there. That invariant is load
+bearing in three places:
+
+- **"Reset cache" is a recovery step, not data loss.** The settings button
+  deletes the file outright, and the next sync rebuilds it.
+- **A schema change re-hydrates instead of migrating.**
+  `parseIncrementalCacheState` returns `undefined` on an unrecognized shape and
+  the cache rebuilds. A store holding unique data could not simply discard
+  itself.
+- **The opt-in framing stays honest.** "Off by default, delete it any time, the
+  limited REST API remains the source of truth" is only true while the file is
+  derived.
+
+The tempting violation is completion history. Marvin's REST API cannot list
+what was completed on a day — `/dueItems` is documented as open-only, there is
+no parameter for completed items, and no `doneItems` endpoint exists — while
+the CouchDB documents do carry `done` and `doneAt`. Retaining those in the
+cache would make it the only copy, which is precisely what turns a cache into a
+system of record.
+
+Durable user data belongs in the vault instead: versioned, backed up, portable,
+and readable without this plugin. `src/marvin/todayProjection.ts` keeps checked
+Marvin lines in the daily note for exactly this reason, so completion history
+lives in the notes rather than in plugin state.
+
+If a future need genuinely cannot be served from the notes, read it live at
+projection time rather than storing it. A one-off query has a different
+lifetime from a cache entry and no reason to share the file.
+
 ### Why edit and delete are not exposed
 
 The limited API has no update or delete endpoint. Its writes are `addTask`,
