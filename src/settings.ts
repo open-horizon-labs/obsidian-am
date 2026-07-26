@@ -279,8 +279,21 @@ private a(href: string, text: string) {
 				})
 			);
 
-		new Setting(containerEl)
-			.setHeading().setName("Experimental incremental sync");
+		// Collapsed by default and never torn down/rebuilt on toggle: a
+		// prior version called this.display() on every change here, which
+		// destroyed and rebuilt the whole tab with no scroll/focus
+		// continuity — a real tester reported "there's no place to put the
+		// additional creds" because the newly-created fields landed below
+		// the fold with no visual cue anything had changed. Fields are now
+		// always present (matching the Local Server section's own
+		// setDisabled pattern below) and just enabled/disabled in place.
+		const incrementalDetails = containerEl.createEl("details");
+		const incrementalSummary = incrementalDetails.createEl("summary", {
+			text: "Experimental incremental sync",
+		});
+		incrementalSummary.style.cursor = "pointer";
+		incrementalSummary.style.fontWeight = "600";
+		incrementalSummary.style.padding = "8px 0";
 
 		const incrementalDescEl = createFragment();
 		incrementalDescEl.appendText(
@@ -290,10 +303,32 @@ private a(href: string, text: string) {
 			+ "API token above) for avoiding that throttling entirely during ongoing sync. The limited "
 			+ "token remains the default and fallback; this is opt-in and off by default.",
 		);
-		const incrementalHeading = new Setting(containerEl);
-		incrementalHeading.descEl.appendChild(incrementalDescEl);
+		new Setting(incrementalDetails)
+			.setName("Why this needs a bigger credential")
+			.setDesc(incrementalDescEl);
 
-		new Setting(containerEl)
+		const incrementalFieldSettings: Setting[] = [];
+
+		const credentialsLookComplete = () => Boolean(
+			this.plugin.settings.databaseServer.trim()
+			&& this.plugin.settings.databaseName.trim()
+			&& this.plugin.settings.databaseUser.trim()
+			&& this.plugin.settings.databasePassword,
+		);
+
+		let syncNowSetting: Setting;
+		const updateSyncNowState = () => {
+			const enabled = this.plugin.settings.incrementalSyncEnabled;
+			const ready = enabled && credentialsLookComplete();
+			syncNowSetting.setDisabled(!ready);
+			syncNowSetting.setDesc(
+				enabled && !ready
+					? "Fill in all four database fields above to enable this."
+					: "Manually trigger an incremental sync using the credentials above.",
+			);
+		};
+
+		new Setting(incrementalDetails)
 			.setName("Enable incremental sync")
 			.setDesc("Requires separate database credentials from Amazing Marvin's API settings page, not the limited API token.")
 			.addToggle(toggle => toggle
@@ -301,47 +336,67 @@ private a(href: string, text: string) {
 				.onChange(async (value) => {
 					this.plugin.settings.incrementalSyncEnabled = value;
 					await this.plugin.saveSettings();
-					this.display();
+					for (const setting of incrementalFieldSettings) {
+						setting.setDisabled(!value);
+					}
+					updateSyncNowState();
 				})
 			);
 
-		if (this.plugin.settings.incrementalSyncEnabled) {
-			new Setting(containerEl)
+		const fieldsDisabled = !this.plugin.settings.incrementalSyncEnabled;
+
+		incrementalFieldSettings.push(
+			new Setting(incrementalDetails)
 				.setName("Database server")
 				.setDesc("From Amazing Marvin's API settings page — the server field, without the database name.")
+				.setDisabled(fieldsDisabled)
 				.addText(text => text
 					.setPlaceholder("https://your-instance.cloudant.com")
 					.setValue(this.plugin.settings.databaseServer)
 					.onChange(async (value) => {
 						this.plugin.settings.databaseServer = value.trim();
 						await this.plugin.saveSettings();
+						updateSyncNowState();
 					})
-				);
+				),
+		);
 
-			new Setting(containerEl)
+		incrementalFieldSettings.push(
+			new Setting(incrementalDetails)
 				.setName("Database name")
+				.setDesc("The database identifier from the same page, separate from the server.")
+				.setDisabled(fieldsDisabled)
 				.addText(text => text
 					.setPlaceholder("u1234567")
 					.setValue(this.plugin.settings.databaseName)
 					.onChange(async (value) => {
 						this.plugin.settings.databaseName = value.trim();
 						await this.plugin.saveSettings();
+						updateSyncNowState();
 					})
-				);
+				),
+		);
 
-			new Setting(containerEl)
+		incrementalFieldSettings.push(
+			new Setting(incrementalDetails)
 				.setName("Database user")
+				.setDesc("The database username, distinct from your Amazing Marvin login.")
+				.setDisabled(fieldsDisabled)
 				.addText(text => text
 					.setValue(this.plugin.settings.databaseUser)
 					.onChange(async (value) => {
 						this.plugin.settings.databaseUser = value.trim();
 						await this.plugin.saveSettings();
+						updateSyncNowState();
 					})
-				);
+				),
+		);
 
-			new Setting(containerEl)
+		incrementalFieldSettings.push(
+			new Setting(incrementalDetails)
 				.setName("Database password")
 				.setDesc("Stored locally in this plugin's Obsidian settings. Treat it as highly sensitive — it grants full read access to your Amazing Marvin database, not just the limited API surface.")
+				.setDisabled(fieldsDisabled)
 				.addText(text => {
 					text.inputEl.type = "password";
 					text
@@ -349,56 +404,69 @@ private a(href: string, text: string) {
 						.onChange(async (value) => {
 							this.plugin.settings.databasePassword = value;
 							await this.plugin.saveSettings();
+							updateSyncNowState();
 						});
-				});
+				}),
+		);
 
-			new Setting(containerEl)
-				.setName("Sync now")
-				.setDesc("Manually trigger an incremental sync using the credentials above.")
-				.addButton(button => button
-					.setButtonText("Sync now")
-					.onClick(async () => {
-						try {
-							await this.plugin.runIncrementalSync("manual");
-							new Notice("Amazing Marvin incremental sync complete.");
-						} catch (error) {
-							console.error("Amazing Marvin incremental sync failed:", error);
-							new Notice(`Amazing Marvin incremental sync failed: ${error instanceof Error ? error.message : String(error)}`);
-						}
-						// Otherwise the Status line below stays stale (still
-						// "Not yet synced" or a prior error) until the user
-						// closes and reopens the settings tab.
-						this.display();
-					})
-				);
-		}
+		syncNowSetting = new Setting(incrementalDetails)
+			.setName("Sync now")
+			.addButton(button => button
+				.setButtonText("Sync now")
+				.onClick(async () => {
+					try {
+						await this.plugin.runIncrementalSync("manual");
+						new Notice("Amazing Marvin incremental sync complete.");
+					} catch (error) {
+						console.error("Amazing Marvin incremental sync failed:", error);
+						new Notice(`Amazing Marvin incremental sync failed: ${error instanceof Error ? error.message : String(error)}`);
+					}
+					updateStatusSetting();
+				})
+			);
+		updateSyncNowState();
 
-		// Deliberately outside the enabled-only block: a stale cache file
-		// from before the user disabled incremental sync (or cleared
+		// Deliberately not gated on incrementalSyncEnabled: a stale cache
+		// file from before the user disabled the feature (or cleared
 		// credentials) must still be clearable. resetIncrementalCache() is
 		// a safe no-op when there's nothing to clear, and in-memory status
 		// (unlike the on-disk file) doesn't survive an Obsidian restart, so
 		// there's no reliable signal to gate this on beyond "always show it."
-		{
+		let statusSetting: Setting;
+		const updateStatusSetting = () => {
 			const status = this.plugin.getIncrementalSyncStatus();
-			new Setting(containerEl)
-				.setName("Incremental sync status")
-				.setDesc(
-					status.lastError
-						? `Last error: ${status.lastError}`
-						: status.lastSuccessfulSyncAt
-							? `Last synced: ${new Date(status.lastSuccessfulSyncAt).toLocaleString()}`
-							: "Not yet synced.",
-				)
-				.addButton(button => button
-					.setButtonText("Reset cache")
-					.onClick(async () => {
-						await this.plugin.resetIncrementalCache();
-						new Notice("Amazing Marvin incremental cache reset. The next sync will re-hydrate from scratch.");
-						this.display();
-					})
-				);
-		}
+			statusSetting.setDesc(
+				status.lastError
+					? `Last error: ${status.lastError}`
+					: status.lastSuccessfulSyncAt
+						? `Last synced: ${new Date(status.lastSuccessfulSyncAt).toLocaleString()}`
+						: "Not yet synced.",
+			);
+		};
+		statusSetting = new Setting(incrementalDetails)
+			.setName("Incremental sync status")
+			.addButton(button => {
+				let confirming = false;
+				let confirmTimer: number | undefined;
+				button.setButtonText("Reset cache").onClick(async () => {
+					if (!confirming) {
+						confirming = true;
+						button.setButtonText("Click again to confirm");
+						confirmTimer = window.setTimeout(() => {
+							confirming = false;
+							button.setButtonText("Reset cache");
+						}, 4_000);
+						return;
+					}
+					window.clearTimeout(confirmTimer);
+					confirming = false;
+					button.setButtonText("Reset cache");
+					await this.plugin.resetIncrementalCache();
+					new Notice("Amazing Marvin incremental cache reset. The next sync will re-hydrate from scratch.");
+					updateStatusSetting();
+				});
+			});
+		updateStatusSetting();
 
 		new Setting(containerEl)
 			.setHeading().setName("Today Tasks");
@@ -586,21 +654,28 @@ private a(href: string, text: string) {
 			);
 
 		if (Platform.isDesktopApp) {
+			const localServerDetails = containerEl.createEl("details");
+			const localServerSummary = localServerDetails.createEl("summary", {
+				text: "Local Server",
+			});
+			localServerSummary.style.cursor = "pointer";
+			localServerSummary.style.fontWeight = "600";
+			localServerSummary.style.padding = "8px 0";
+
 			const lsDescEl = createFragment();
 			lsDescEl.appendText('The local API can speed up the plugin. See the ');
 			lsDescEl.appendChild(this.a('https://help.amazingmarvin.com/en/articles/5165191-desktop-local-api-server', 'Desktop Local API Server'));
 			lsDescEl.appendText(' for more information.');
-
-			let ls = new Setting(containerEl)
-				.setHeading().setName("Local Server");
-			ls.descEl.appendChild(lsDescEl);
+			new Setting(localServerDetails)
+				.setName("About the local server")
+				.setDesc(lsDescEl);
 
 			// Local Server Toggle
-			let localServerToggle = new Setting(containerEl)
+			let localServerToggle = new Setting(localServerDetails)
 				.setName("Use Local Server")
 				.setDesc("Attempt to use the local Amazing Marvin server first");
 
-			let localServerHostSetting = new Setting(containerEl)
+			let localServerHostSetting = new Setting(localServerDetails)
 				.setName("Host")
 				.addText(text => text
 					.setPlaceholder("localhost")
@@ -613,7 +688,7 @@ private a(href: string, text: string) {
 				);
 
 			// Local Server Port
-			let localServerPortSetting = new Setting(containerEl)
+			let localServerPortSetting = new Setting(localServerDetails)
 				.setName("Port")
 				.addText(text => text
 					.setPlaceholder("12082")
