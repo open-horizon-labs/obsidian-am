@@ -1,5 +1,5 @@
 {
-  "name": "cloud-atlas-am",
+  "name": "open-horizon-am",
   "version": "0.11.0-beta9",
   "description": "Interoperability between Obsidian and Amazing Marvin",
   "private": true,
@@ -15,11 +15,12 @@
     "dev": "npm run build:client && node esbuild.config.mjs",
     "dev-build": "npm run build:client && tsc -noEmit -skipLibCheck && node esbuild.config.mjs dev-build",
     "test": "npm run build:client && vitest run",
+    "check:manifests": "node scripts/check-manifests.mjs",
     "typecheck": "npm run build:client && tsc -noEmit -skipLibCheck && npm run typecheck --workspaces --if-present",
     "version": "node version-bump.mjs && git add manifest.json versions.json"
   },
   "keywords": [],
-  "author": "",
+  "author": "Open Horizon Labs",
   "license": "MIT",
   "dependencies": {
     "@open-horizon/marvin-client": "file:packages/marvin-client",
