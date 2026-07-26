@@ -319,16 +319,44 @@ local-first reads through the Amazing Marvin desktop API. The optional
 `AMAZING_MARVIN_LOCAL_API_URL` and `AMAZING_MARVIN_PUBLIC_API_URL` override
 their endpoints.
 
+#### Reading the plugin's incremental cache (optional)
+
 If the Obsidian plugin's experimental incremental sync (below) is enabled
-for the same Amazing Marvin account, point the MCP server at the same
-persisted cache file with `AMAZING_MARVIN_INCREMENTAL_CACHE_PATH` (the
-plugin's data directory, `marvin-incremental-cache-v1.json`) so
-`marvin_categories`/`marvin_children` read from it instead of a REST round
-trip when it's fresh enough. This is read-only and best-effort: the MCP
-server never needs the database credentials, and it falls back to REST on
-any failure — missing file, unparseable, or older than
-`AMAZING_MARVIN_INCREMENTAL_CACHE_MAX_AGE_MS` (default 10 minutes). Leave
-it unset for the existing REST-only behavior.
+for the same Amazing Marvin account, the MCP server can read the same
+persisted cache file so `marvin_categories`/`marvin_children` skip a REST
+round trip when it's fresh enough. This is read-only and best-effort: the
+MCP server never needs the database credentials, and it falls back to REST
+on any failure. Leave it unset for the existing REST-only behavior.
+
+**The MCP server and the Obsidian plugin are separate installs.** Installing
+or updating the plugin (via BRAT or the community store) does not update this
+repository's checkout, which is what `packages/marvin-mcp/dist/server.js` is
+built from. A checkout older than the release that introduced this feature has
+no code reading the variable at all, so setting it there is **silently
+ignored** — no warning, no error, it just keeps using REST. Before setting it:
+
+```sh
+git -C /path/to/obsidian-am fetch --tags
+git -C /path/to/obsidian-am checkout <release-tag>   # e.g. 0.11.0-beta3
+npm --prefix /path/to/obsidian-am ci
+npm --prefix /path/to/obsidian-am run build
+```
+
+Then set:
+
+- `AMAZING_MARVIN_INCREMENTAL_CACHE_PATH` — absolute path to
+  `<vault>/.obsidian/plugins/<plugin-id>/marvin-incremental-cache-v1.json`.
+  The file only exists after the plugin has run incremental sync at least
+  once; check that it exists before pointing at it.
+- `AMAZING_MARVIN_INCREMENTAL_CACHE_MAX_AGE_MS` (optional) — how stale the
+  cache may be before REST is preferred instead. Default 10 minutes.
+
+To confirm it's actually working, call `marvin_categories` and check the
+result envelope: a cache hit reports `"freshness": "cached"` with
+`"origin": "local"`, while a REST read reports `"freshness": "fresh"` with
+`"origin": "public"`. If you see `fresh`/`public` with the variable set,
+either the path is wrong, the cache is stale, or the build predates this
+feature.
 
 ### Tool workflow
 
