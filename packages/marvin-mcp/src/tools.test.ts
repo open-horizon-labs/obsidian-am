@@ -7,7 +7,7 @@ import {
 	type Task,
 	type TaskOrProject,
 } from "@open-horizon/marvin-client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	createMarvinMcpServer,
 	type MarvinOperations,
@@ -60,8 +60,11 @@ describe("Amazing Marvin MCP", () => {
 		await Promise.all(close.splice(0).map((callback) => callback()));
 	});
 
-	async function connect(ops: MarvinOperations) {
-		const server = createMarvinMcpServer(ops);
+	async function connect(
+		ops: MarvinOperations,
+		options?: { requestCacheRefresh?: () => Promise<void> },
+	) {
+		const server = createMarvinMcpServer(ops, options);
 		const client = new Client({ name: "test-client", version: "0.1.0" });
 		const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 		await server.connect(serverTransport);
@@ -244,4 +247,38 @@ describe("Amazing Marvin MCP", () => {
 			["markDone", "created-1", -240],
 		]);
 	});
+
+	it("requests a cache refresh only when the refresh parameter is true", async () => {
+		const requestCacheRefresh = vi.fn(async () => {});
+		const client = await connect(operations(), { requestCacheRefresh });
+
+		// Default (omitted) must not trigger a refresh — the passive,
+		// zero-latency read stays the norm.
+		await client.callTool({ name: "marvin_categories", arguments: {} });
+		expect(requestCacheRefresh).not.toHaveBeenCalled();
+
+		await client.callTool({
+			name: "marvin_categories",
+			arguments: { refresh: true },
+		});
+		expect(requestCacheRefresh).toHaveBeenCalledTimes(1);
+
+		await client.callTool({
+			name: "marvin_children",
+			arguments: { parentId: "project-1", refresh: true },
+		});
+		expect(requestCacheRefresh).toHaveBeenCalledTimes(2);
+	});
+
+	it("accepts refresh as a no-op when no refresh hook is wired", async () => {
+		// Without a configured cache path the server has nothing to ask, but
+		// the parameter must still be accepted rather than erroring.
+		const client = await connect(operations());
+		const result = await client.callTool({
+			name: "marvin_categories",
+			arguments: { refresh: true },
+		});
+		expect(result.isError ?? false).toBe(false);
+	});
+
 });

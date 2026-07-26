@@ -1,3 +1,8 @@
+import {
+	INCREMENTAL_CACHE_FILENAME,
+	INCREMENTAL_SYNC_REQUEST_FILENAME,
+} from "@open-horizon/marvin-client";
+
 import type {
 	CouchChangesTransport,
 } from "./couchChanges";
@@ -36,14 +41,31 @@ export function createObsidianCouchTransport(
 
 export class ObsidianIncrementalCacheStore implements IncrementalCacheStore {
 	readonly path: string;
+	/** Where the MCP server drops a sync request for this plugin to pick up. */
+	readonly syncRequestPath: string;
 
 	constructor(
 		private readonly adapter: IncrementalFileAdapter,
 		pluginDirectory: string,
 	) {
 		this.path = normalizeAdapterPath(
-			`${pluginDirectory}/marvin-incremental-cache-v1.json`,
+			`${pluginDirectory}/${INCREMENTAL_CACHE_FILENAME}`,
 		);
+		this.syncRequestPath = normalizeAdapterPath(
+			`${pluginDirectory}/${INCREMENTAL_SYNC_REQUEST_FILENAME}`,
+		);
+	}
+
+	/** Consumes a pending MCP sync request, returning whether one was there.
+	 * Deleted before syncing, not after: if the sync fails, the requester's
+	 * bounded wait should time out and fall back to REST rather than have
+	 * the plugin retry the same request on its next tick forever. */
+	async consumeSyncRequest(): Promise<boolean> {
+		if (!await this.adapter.exists(this.syncRequestPath)) {
+			return false;
+		}
+		await this.adapter.remove(this.syncRequestPath);
+		return true;
 	}
 
 	async load(): Promise<unknown> {

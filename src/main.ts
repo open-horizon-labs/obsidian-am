@@ -284,6 +284,13 @@ export default class AmazingMarvinPlugin extends Plugin {
 		this.registerInterval(window.setInterval(() => {
 			void this.runAutomaticIncrementalSync("interval");
 		}, 60_000));
+		// Short poll for an MCP-dropped sync request. One exists() per tick,
+		// and only while incremental sync is actually configured — this is
+		// what lets an agent ask for current data instead of waiting out the
+		// 60s interval above. See INCREMENTAL_SYNC_REQUEST_FILENAME.
+		this.registerInterval(window.setInterval(() => {
+			void this.serveIncrementalSyncRequest();
+		}, 2_000));
 		this.app.workspace.onLayoutReady(() => {
 			void this.runAutomaticIncrementalSync("startup");
 		});
@@ -723,6 +730,38 @@ export default class AmazingMarvinPlugin extends Plugin {
 		// this.incrementalBackoff's max delay (5 minutes).
 		this.incrementalBackoff.recordSuccess();
 		return this.incrementalCache;
+	}
+
+	/** Picks up a sync request dropped by the MCP server and services it.
+	 * Deliberately bypasses runAutomaticIncrementalSync's rate limiting: the
+	 * request is an explicit ask from a caller that is currently blocked
+	 * waiting on it, not a background tick. Backoff is still respected, so a
+	 * failing endpoint can't be hammered through this path. */
+	private async serveIncrementalSyncRequest(): Promise<void> {
+		if (!this.settings.incrementalSyncEnabled) {
+			return;
+		}
+		const store = new ObsidianIncrementalCacheStore(
+			this.buildObsidianFileAdapter(),
+			this.getPluginDataDir(),
+		);
+		let requested: boolean;
+		try {
+			requested = await store.consumeSyncRequest();
+		} catch (error) {
+			console.warn("Could not read the Amazing Marvin sync request:", error);
+			return;
+		}
+		if (!requested || !this.incrementalBackoff.canRun()) {
+			return;
+		}
+		try {
+			await this.runIncrementalSync("MCP request");
+		} catch (error) {
+			// The requester's bounded wait times out and falls back to REST;
+			// no notice, since nothing the user did triggered this.
+			console.warn("Amazing Marvin sync requested by MCP failed:", error);
+		}
 	}
 
 	private async runAutomaticIncrementalSync(reason: string): Promise<void> {

@@ -9,6 +9,37 @@ import type { Category, Project, Task } from "./types.js";
 
 type CouchSequence = unknown;
 
+/** The plugin writes its incremental cache here, inside its own plugin data
+ * directory. Named once, shared, so the writer and the cross-process reader
+ * can't drift apart. */
+export const INCREMENTAL_CACHE_FILENAME = "marvin-incremental-cache-v1.json";
+
+/** Sentinel the MCP server drops beside the cache file to ask the running
+ * plugin for a sync. A file, not a socket: the MCP server already has this
+ * directory path (it reads the cache from it), so this needs no network
+ * listener on the plugin side and no shared secret between the processes.
+ * The plugin polls for it, syncs, and deletes it. */
+export const INCREMENTAL_SYNC_REQUEST_FILENAME = "marvin-sync-request.json";
+
+export interface IncrementalSyncRequest {
+	/** When the request was written, so the plugin can ignore ancient ones
+	 * and the requester can tell its own request from a stale leftover. */
+	requestedAt: number;
+}
+
+export function parseIncrementalSyncRequest(
+	value: unknown,
+): IncrementalSyncRequest | undefined {
+	if (
+		typeof value !== "object"
+		|| value === null
+		|| typeof (value as Partial<IncrementalSyncRequest>).requestedAt !== "number"
+	) {
+		return undefined;
+	}
+	return { requestedAt: (value as IncrementalSyncRequest).requestedAt };
+}
+
 export type CachedMarvinItem = Category | Project | Task;
 export type CachedMarvinContainer = Category | Project;
 

@@ -1,12 +1,15 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
 	FetchTransport,
+	INCREMENTAL_SYNC_REQUEST_FILENAME,
 	MarvinApiClient,
 	MarvinRouter,
 } from "@open-horizon/marvin-client";
 import { createCachePreferringOperations } from "./incrementalCacheOperations.js";
+import { createCacheRefreshRequester } from "./incrementalRefresh.js";
 import { createMarvinMcpServer, type MarvinOperations } from "./tools.js";
 
 export interface MarvinMcpEnvironment {
@@ -20,6 +23,9 @@ export interface MarvinMcpEnvironment {
 	// enabled. Optional — REST remains the default with no config at all.
 	AMAZING_MARVIN_INCREMENTAL_CACHE_PATH?: string;
 	AMAZING_MARVIN_INCREMENTAL_CACHE_MAX_AGE_MS?: string;
+	// How long a refresh-requesting read waits for the plugin before giving
+	// up and answering from cache/REST. Default 5s.
+	AMAZING_MARVIN_REFRESH_TIMEOUT_MS?: string;
 }
 
 export function createRouterFromEnvironment(
@@ -70,10 +76,37 @@ export function createOperationsFromEnvironment(
 	});
 }
 
+/** Wires the `refresh` tool parameter, but only when a cache path is
+ * configured — without one there's no plugin cache to ask about, and the
+ * parameter stays an accepted no-op. */
+export function createRefreshRequesterFromEnvironment(
+	environment: MarvinMcpEnvironment = process.env,
+): (() => Promise<void>) | undefined {
+	const cachePath = environment.AMAZING_MARVIN_INCREMENTAL_CACHE_PATH?.trim();
+	if (!cachePath) {
+		return undefined;
+	}
+	const timeoutMs = Number(environment.AMAZING_MARVIN_REFRESH_TIMEOUT_MS);
+	return createCacheRefreshRequester({
+		cachePath,
+		syncRequestPath: path.join(
+			path.dirname(cachePath),
+			INCREMENTAL_SYNC_REQUEST_FILENAME,
+		),
+		readFile: (target) => readFile(target, "utf8"),
+		writeFile: (target, data) => writeFile(target, data, "utf8"),
+		...(Number.isFinite(timeoutMs) && timeoutMs > 0 ? { timeoutMs } : {}),
+	});
+}
+
 export async function runMcpServer(
 	environment: MarvinMcpEnvironment = process.env,
 ): Promise<void> {
-	const server = createMarvinMcpServer(createOperationsFromEnvironment(environment));
+	const requestCacheRefresh = createRefreshRequesterFromEnvironment(environment);
+	const server = createMarvinMcpServer(
+		createOperationsFromEnvironment(environment),
+		{ ...(requestCacheRefresh ? { requestCacheRefresh } : {}) },
+	);
 	await server.connect(new StdioServerTransport());
 	console.error("Amazing Marvin MCP server running on stdio");
 }
