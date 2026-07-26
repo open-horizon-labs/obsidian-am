@@ -1,78 +1,71 @@
-## What's in this beta
+## Completed tasks stay in your daily note
 
-A new MCP tool, plus a documented answer to "why can't the agent rename or
-delete things?"
+If you checked off a task in the managed Today region, the next refresh deleted
+the line. Your daily note recorded only what you *hadn't* finished — which is
+backwards for a record of the day.
 
-## `marvin_create_project`
+Completed tasks now stay, checked off, in the position they were already in.
 
-An agent could create tasks but not a project to put them in. It can now.
-Uses the same limited API token as everything else — no new credential.
+### Why it was happening
 
-Projects aren't quite tasks: they support `priority` (`high`/`mid`/`low`),
-which tasks don't, and they don't take `plannedWeek`/`plannedMonth`.
+Marvin's Today and due reads only return **open** work. `/dueItems` is
+documented as "open", `/todayItems` has no parameter for completed items, and
+there is no endpoint at all that lists what you completed on a given day. So
+once you checked a task, the refresh saw it missing from the read and removed
+the line. The note renderer already knew how to draw a checked box — the data
+just never survived long enough to reach it.
 
-One rough edge worth knowing about, and it's Marvin's, not ours: Marvin's docs
-say the create response will include the new project's ID "in the future" —
-meaning today a successful create can come back without one. When that happens
-the tool reports `created: true` with `idUnavailable: true` and tells the caller
-to look the project up rather than retry. **It deliberately does not report an
-error**, because the project *was* created, and an agent treating it as a
-failure would retry and make a second one.
+### What it does now
 
-## Why rename / move / delete still aren't exposed
+A checked Marvin line already in the region is kept, verbatim, when the current
+read no longer returns it, and it holds its original position rather than
+sliding to the bottom.
 
-Short version: Marvin's limited API can't do them, and the API that can is one
-we're deliberately not touching.
+Kept deliberately narrow, because over-preserving would pin stale work into
+notes forever:
 
-The limited token's writes are create-task, create-project, create-event,
-mark-done, time tracking, reward points, reminders, and habits. There's no
-update or delete endpoint at all. Renaming, reparenting, or rescheduling
-requires `/api/doc/update` and `/api/doc/delete`, which need a **third**
-credential beyond the API token and the database credentials — and which
-Marvin's own documentation warns about plainly: a wrong document shape "might
-cause Marvin to crash on startup," and API deletes bypass Marvin's client-side
-Trash, so "you won't be able to recover any documents deleted in this way."
+- **Only checked lines are kept.** An unchecked task Marvin no longer returns
+  has genuinely left your Today list — deleted, rescheduled, or unscheduled —
+  so it still disappears, as before.
+- **Marvin still wins.** If you un-complete a task in Marvin, it renders as open
+  again on the next refresh rather than staying stuck as a checked line.
+- **Nothing accumulates across days.** Preservation is scoped to each note's own
+  dated region.
 
-Handing an autonomous agent a tool that can permanently destroy unrecoverable
-data isn't worth a tidier CRUD surface. Edit and delete stay in Marvin's own
-apps. The reasoning is now written down in
-`docs/architecture/marvin-client-and-mcp.md` so it doesn't have to be
-re-litigated from scratch.
+Needs no new credentials, and works whether or not you use incremental sync.
 
-**Correcting myself on the test plan:** several of these release notes have
-listed "rename/move/delete propagation" as untestable because MCP lacks those
-routes. That was wrong — the test never needed MCP. Rename or move something
-**in Amazing Marvin**, then watch the plugin's incremental sync bring it into
-the vault. That's both possible today and closer to how anyone actually uses
-this.
+### One case this doesn't cover yet
+
+A task you completed **in Marvin's app** that had never appeared in your note
+won't show up — there's no line in the note to preserve. The CouchDB cache does
+have completed tasks with their completion timestamps and could fill that gap;
+it currently discards them. Worth doing as a follow-up if you find yourself
+wanting it, and it'd be a second real payoff for the database credential beyond
+avoiding throttling.
 
 ## How to test
 
-1. Update your MCP checkout and rebuild — the MCP server builds from this repo,
-   not from the BRAT-installed plugin:
-   ```sh
-   git -C /path/to/obsidian-am fetch --tags
-   git -C /path/to/obsidian-am checkout 0.11.0-beta8
-   npm --prefix /path/to/obsidian-am ci
-   npm --prefix /path/to/obsidian-am run build
-   ```
-2. Ask your agent to create a project with `marvin_create_project`, then create
-   a task inside it with `marvin_create_task` using the returned `parentId`.
-   Confirm both land in Marvin.
-3. Note what the create returned: an `id`, or `idUnavailable: true`? Either is
-   correct behavior — worth reporting which you got, since it tells us whether
-   Marvin has shipped the ID in the response yet.
-4. **The propagation test that was never actually blocked:** in Amazing Marvin,
-   rename a task, move it to a different category, then delete it — one at a
-   time. After each, confirm the vault catches up (automatically within about a
-   minute, or immediately via "Sync now").
+1. Install `0.11.0-beta9` via BRAT.
+2. Open today's daily note with an initialized Today region and some open tasks.
+3. Check one off in Obsidian. Wait for the automatic refresh (window focus, or
+   about a minute) or run "Refresh today's tasks".
+4. **The task should still be there, checked, in the same spot.** Previously it
+   vanished.
+5. Let several refreshes run. The note should stop changing — no duplicates, no
+   drift.
+6. Complete a different task in Marvin's own app instead of in Obsidian. It
+   should also stay in the note, checked.
+7. Un-complete that task in Marvin. It should go back to an open checkbox.
+8. In Marvin, reschedule a still-open task to a different day. It **should**
+   disappear from today's note — that's intended, not a regression.
 
-### Still genuinely uncovered
+### Still uncovered
 
-Reset-cache rehydration, and disabling incremental sync then running the
-regular importer.
+Reset-cache rehydration, and disabling incremental sync then running the regular
+importer.
 
 ## Feedback
 
-[Issue #55](https://github.com/open-horizon-labs/obsidian-am/issues/55) for test
-results; a new issue for anything that looks like a distinct bug.
+[Issue #55](https://github.com/open-horizon-labs/obsidian-am/issues/55) for
+incremental-sync results. This Today-region change is better discussed on a new
+issue if something's off, since it's independent of the sync work.
