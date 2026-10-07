@@ -26,6 +26,7 @@ const todayResult: MarvinReadResult<TaskOrProject[]> = {
 function operations(overrides: Partial<MarvinOperations> = {}): MarvinOperations {
 	return {
 		getTodayItems: async () => todayResult,
+		getDoneItems: async () => ({ ...todayResult, data: [{ _id: "done-1", title: "Finished", done: true }] }),
 		getDueItems: async () => ({ ...todayResult, data: [] }),
 		getCategories: async () => ({
 			...todayResult,
@@ -87,6 +88,7 @@ describe("Amazing Marvin MCP", () => {
 			name: "marvin_labels",
 			arguments: {},
 		});
+		const done = await client.callTool({ name: "marvin_done", arguments: { date: "2026-07-23" } });
 		const categories = await client.callTool({
 			name: "marvin_categories",
 			arguments: {},
@@ -101,6 +103,7 @@ describe("Amazing Marvin MCP", () => {
 			"marvin_children",
 			"marvin_create_project",
 			"marvin_create_task",
+			"marvin_done",
 			"marvin_due",
 			"marvin_labels",
 			"marvin_mark_done",
@@ -122,6 +125,7 @@ describe("Amazing Marvin MCP", () => {
 				title: "Knowledge work",
 			}],
 		});
+		expect(done.structuredContent).toMatchObject({ items: [{ id: "done-1", done: true }] });
 		expect(categories.structuredContent).toMatchObject({
 			items: [{
 				id: "project-1",
@@ -234,6 +238,8 @@ describe("Amazing Marvin MCP", () => {
 			},
 		});
 		expect(completed.structuredContent).toMatchObject({
+			outcome: "accepted",
+			status: "accepted_unconfirmed",
 			itemId: "created-1",
 			result: { success: true },
 		});
@@ -410,4 +416,30 @@ describe("Amazing Marvin MCP", () => {
 		});
 	});
 
+	it("acknowledges empty and done-object HTTP-success results without claiming observed completion", async () => {
+		const client = await connect(operations({ markDone: async () => null }));
+		const empty = await client.callTool({ name: "marvin_mark_done", arguments: { itemId: "task-1" } });
+		expect(empty.isError).not.toBe(true);
+		expect(empty.structuredContent).toEqual({
+			outcome: "accepted", status: "accepted_unconfirmed", itemId: "task-1", result: null,
+		});
+		const doneClient = await connect(operations({ markDone: async () => ({ done: true }) }));
+		const done = await doneClient.callTool({ name: "marvin_mark_done", arguments: { itemId: "task-2" } });
+		expect(done.structuredContent).toEqual({
+			outcome: "accepted", status: "accepted_unconfirmed", itemId: "task-2", result: { done: true },
+		});
+	});
+
+	it("never acknowledges a failed mark-done operation", async () => {
+		const client = await connect(operations({
+			markDone: async () => { throw new MarvinError({
+				kind: "http", message: "Marvin rejected mark done", operation: "mark done",
+				origin: "public", status: 409,
+			}); },
+		}));
+		const result = await client.callTool({ name: "marvin_mark_done", arguments: { itemId: "task-1" } });
+		expect(result.isError).toBe(true);
+		expect(result.structuredContent).toMatchObject({ error: { kind: "http", status: 409 } });
+		expect(result.structuredContent).not.toHaveProperty("outcome", "accepted");
+	});
 });

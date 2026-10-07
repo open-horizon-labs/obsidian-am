@@ -37,6 +37,25 @@ describe("MarvinRouter", () => {
 		expect(publicApi.requests).toHaveLength(1);
 	});
 
+	it("invalidates a cached completed-items read after mark done", async () => {
+		const publicApi = new QueueTransport(
+			jsonResponse(200, []),
+			jsonResponse(200, { done: true }),
+			jsonResponse(200, [{ _id: "task-1", title: "Finished", done: true }]),
+		);
+		const router = new MarvinRouter({ publicClient: api("public", publicApi) });
+		await expect(router.getDoneItems("2026-07-23")).resolves.toMatchObject({ data: [] });
+		await expect(router.markDone("task-1")).resolves.toEqual({ done: true });
+		await expect(router.getDoneItems("2026-07-23")).resolves.toMatchObject({
+			data: [{ _id: "task-1", done: true }], freshness: "fresh",
+		});
+		expect(publicApi.requests.map((request) => request.url)).toEqual([
+			"https://example.test/api/doneItems?date=2026-07-23",
+			"https://example.test/api/markDone",
+			"https://example.test/api/doneItems?date=2026-07-23",
+		]);
+	});
+
 	it("accepts a successful empty local result without public fallback", async () => {
 		const local = new QueueTransport(jsonResponse(200, []));
 		const publicApi = new QueueTransport(jsonResponse(200, ["unexpected"]));

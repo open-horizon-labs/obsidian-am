@@ -29,13 +29,14 @@ const DEFAULT_THROTTLE_BLOCK_MS = 60_000;
 
 const DEFAULT_CACHE_POLICIES = {
 	today: { freshTtlMs: 30_000, staleIfErrorMs: 10 * 60_000 },
+	done: { freshTtlMs: 30_000, staleIfErrorMs: 10 * 60_000 },
 	due: { freshTtlMs: 30_000, staleIfErrorMs: 10 * 60_000 },
 	children: { freshTtlMs: 60_000, staleIfErrorMs: 15 * 60_000 },
 	categories: { freshTtlMs: 5 * 60_000, staleIfErrorMs: 60 * 60_000 },
 	labels: { freshTtlMs: 60 * 60_000, staleIfErrorMs: 24 * 60 * 60_000 },
 } satisfies Record<ReadKind, MarvinCachePolicy>;
 
-type ReadKind = "today" | "due" | "children" | "categories" | "labels";
+type ReadKind = "today" | "done" | "due" | "children" | "categories" | "labels";
 
 export interface MarvinRouterOptions {
 	publicClient: MarvinApiClient;
@@ -96,6 +97,15 @@ export class MarvinRouter {
 			this.policies.today,
 			"today items",
 			(client) => client.getTodayItems(date),
+		);
+	}
+
+	getDoneItems(date?: string): Promise<MarvinReadResult<TaskOrProject[]>> {
+		return this.readThrough(
+			`done:${date ?? "server-today"}`,
+			this.policies.done,
+			"done items",
+			(client) => client.getDoneItems(date),
 		);
 	}
 
@@ -190,7 +200,7 @@ export class MarvinRouter {
 	}
 
 	private invalidateTaskLists(): void {
-		this.cache.invalidatePrefixes(["today:", "due:", "children:"]);
+		this.cache.invalidatePrefixes(["today:", "done:", "due:", "children:"]);
 	}
 
 	private invalidateProjectLists(): void {

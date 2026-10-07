@@ -108,6 +108,12 @@ export class MarvinApiClient {
 		return requireArray<TaskOrProject>(value, this.context("today items", endpoint, "GET"));
 	}
 
+	async getDoneItems(date?: string): Promise<TaskOrProject[]> {
+		const endpoint = this.withQuery("/doneItems", date ? { date } : {});
+		const value = await this.requestJson("done items", endpoint, "GET");
+		return requireArray<TaskOrProject>(value, this.context("done items", endpoint, "GET"));
+	}
+
 	async getDueItems(by?: string): Promise<TaskOrProject[]> {
 		const endpoint = this.withQuery("/dueItems", by ? { by } : {});
 		const value = await this.requestJson("due items", endpoint, "GET");

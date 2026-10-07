@@ -23,6 +23,39 @@ describe("MarvinApiClient", () => {
 		);
 	});
 
+	it("reads completed items by explicit completion date without changing source state", async () => {
+		const transport = new QueueTransport(jsonResponse(200, [{ _id: "task-1", title: "Done", done: true }]));
+		await expect(client(transport).getDoneItems("2026-07-23")).resolves.toMatchObject([
+			{ _id: "task-1", done: true },
+		]);
+		expect(transport.requests).toMatchObject([{
+			method: "GET", url: "https://example.test/api/doneItems?date=2026-07-23",
+		}]);
+	});
+
+	it("keeps non-2xx completion separate from any acknowledgment", async () => {
+		const transport = new QueueTransport({ status: 409, statusText: "Conflict", headers: {}, text: "refused" });
+		await expect(client(transport).markDone("task-1")).rejects.toMatchObject({
+			kind: "http", status: 409,
+		});
+	});
+
+	it("preserves empty and done-object 2xx completion bodies for the MCP acknowledgment", async () => {
+		const transport = new QueueTransport(
+			{ status: 204, headers: {}, text: "" },
+			jsonResponse(200, { done: true }),
+		);
+		const api = client(transport);
+		await expect(api.markDone("task-1")).resolves.toBeNull();
+		await expect(api.markDone("task-2")).resolves.toEqual({ done: true });
+		expect(transport.requests).toMatchObject([
+			{ method: "POST", url: "https://example.test/api/markDone" },
+			{ method: "POST", url: "https://example.test/api/markDone" },
+		]);
+		expect(JSON.parse(transport.requests[0]?.body ?? "{}")).toMatchObject({ itemId: "task-1" });
+		expect(JSON.parse(transport.requests[1]?.body ?? "{}")).toMatchObject({ itemId: "task-2" });
+	});
+
 	it("defaults task done to false without requiring callers to provide it", async () => {
 		const transport = new QueueTransport(
 			jsonResponse(200, { _id: "task-1", title: "Decide", done: false }),
