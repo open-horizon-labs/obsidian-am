@@ -86,11 +86,12 @@ export function createCachePreferringOperations(
 		// typically a MarvinRouter class instance, whose methods live on
 		// the prototype. Object spread only copies own enumerable
 		// properties, so `{...fallback}` silently drops every method
-		// (getTodayItems, getDueItems, getLabels, addTask, markDone) —
+		// (getTodayItems, getDoneItems, getDueItems, getLabels, addTask, markDone) —
 		// confirmed as a real regression (issue #81): every MCP tool
 		// except marvin_categories/marvin_children broke the moment a
 		// cache path was configured, not just an edge case.
 		getTodayItems: (date) => fallback.getTodayItems(date),
+		getDoneItems: (date) => fallback.getDoneItems(date),
 		getDueItems: (by) => fallback.getDueItems(by),
 		getLabels: () => fallback.getLabels(),
 		addTask: (task) => fallback.addTask(task),

@@ -26,6 +26,7 @@ class FakeMarvinRouter implements MarvinOperations {
 	getChildrenMock = vi.fn(async (_parentId: string) => restResult);
 
 	async getTodayItems() { return restResult; }
+	async getDoneItems() { return restResult; }
 	async getDueItems() { return restResult; }
 	async getCategories() { return this.getCategoriesMock(); }
 	async getChildren(parentId: string) { return this.getChildrenMock(parentId); }
@@ -157,7 +158,7 @@ describe("createCachePreferringOperations", () => {
 	it("preserves EVERY operation, including prototype methods a spread would drop", async () => {
 		// Regression guard for issue #81: a `{...fallback}` spread silently
 		// dropped every prototype method, so with a cache path configured,
-		// marvin_today / marvin_due / marvin_labels / marvin_create_task /
+		// marvin_today / marvin_done / marvin_due / marvin_labels / marvin_create_task /
 		// marvin_mark_done all failed with "... is not a function" while
 		// only categories/children worked.
 		const fallback = fallbackOperations();
@@ -168,6 +169,7 @@ describe("createCachePreferringOperations", () => {
 
 		const required: Array<keyof MarvinOperations> = [
 			"getTodayItems",
+			"getDoneItems",
 			"getDueItems",
 			"getCategories",
 			"getChildren",
@@ -191,6 +193,7 @@ describe("createCachePreferringOperations", () => {
 		// A valid, fresh cache is present — these must still hit REST,
 		// because only categories/children are ever served from cache.
 		expect(await operations.getTodayItems()).toBe(restResult);
+		expect(await operations.getDoneItems()).toBe(restResult);
 		expect(await operations.getDueItems()).toBe(restResult);
 		expect((await operations.getLabels()).data).toEqual([]);
 	});

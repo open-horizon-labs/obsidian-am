@@ -14,6 +14,7 @@ import type { CacheRefreshResult } from "./incrementalRefresh.js";
 export type MarvinOperations = Pick<
 	MarvinRouter,
 	| "getTodayItems"
+	| "getDoneItems"
 	| "getDueItems"
 	| "getCategories"
 	| "getChildren"
@@ -197,6 +198,28 @@ export function createMarvinMcpServer(
 	}, async ({ date }) => {
 		try {
 			return readSuccess(await operations.getTodayItems(
+				requireOptionalDate(date, "date"),
+			));
+		} catch (error) {
+			return failure(error);
+		}
+	});
+
+	server.registerTool("marvin_done", {
+		title: "Amazing Marvin Completed Items",
+		description: "Read tasks and projects completed on a date in Amazing Marvin. Match an exact stable item ID to reconcile a prior completion; absence does not prove that completion failed.",
+		inputSchema: {
+			date: dateSchema.describe(
+				"Optional YYYY-MM-DD completion date; defaults to Marvin's server date",
+			),
+		},
+		annotations: {
+			readOnlyHint: true,
+			openWorldHint: true,
+		},
+	}, async ({ date }) => {
+		try {
+			return readSuccess(await operations.getDoneItems(
 				requireOptionalDate(date, "date"),
 			));
 		} catch (error) {
@@ -411,6 +434,8 @@ export function createMarvinMcpServer(
 				timeZoneOffset ?? new Date().getTimezoneOffset() * -1,
 			);
 			return success({
+				outcome: "accepted",
+				status: "accepted_unconfirmed",
 				itemId,
 				result,
 			});
